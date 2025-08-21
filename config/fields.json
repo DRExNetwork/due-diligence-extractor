@@ -1,0 +1,686 @@
+{
+  "fields": {
+    "existing_electrical_system.energy_bills_12_months.average_monthly_consumption": {
+      "doc_category": "Existing Electrical System",
+      "doc_subcategory": "Energy Bills (From the last 12 months)",
+      "unit": "MWh/month",
+      "extraction_contract": {
+        "intermediate": {
+          "monthly_kwh": {
+            "type": "number",
+            "required": true,
+            "desc": "Total kWh in the billing period"
+          }
+        },
+        "return_value": "monthly_kwh"
+      },
+      "reducer_policy": {
+        "expected_unit": "MWh/month",
+        "method": "single_value",
+        "source_keys": {
+          "values": "monthly_kwh"
+        },
+        "instructions": "- Compute the average of all the monthly consumption values. Ensure the units are consistent and in MWh.",
+        "strategy": "average"
+      },
+      "min_documents": 10
+    },
+    "existing_electrical_system.energy_bills_12_months.average_existing_energy_rate": {
+      "doc_category": "Existing Electrical System",
+      "doc_subcategory": "Energy Bills (From the last 12 months)",
+      "unit": "USD/kWh",
+      "extraction_contract": {
+        "intermediate": {
+          "monthly_kwh": {
+            "type": "number",
+            "required": true,
+            "desc": "kWh for the billing period"
+          },
+          "energy_charge_usd": {
+            "type": "number",
+            "required": false,
+            "desc": "energy-only charge (USD)"
+          },
+          "rate_usd_per_kwh": {
+            "type": "number",
+            "required": false,
+            "desc": "explicit unit rate if printed (USD/kWh)"
+          }
+        },
+        "return_value": "rate_usd_per_kwh"
+      },
+      "reducer_policy": {
+        "expected_unit": "USD/kWh",
+        "method": "single_value",
+        "source_keys": {
+          "rate": "rate_usd_per_kwh",
+          "cost": "energy_charge_usd",
+          "kwh": "monthly_kwh"
+        },
+        "instructions": "- Compute as sum(cost)/sum(kWh).",
+        "strategy": "weighted_average"
+      },
+      "min_documents": 10
+    },
+    "photovoltaic_modules.warranty_certificate.product": {
+      "doc_category": "Photovoltaic Modules",
+      "doc_subcategory": "Warranty Certificate",
+      "unit": "years",
+      "extraction_contract": {
+        "intermediate": {
+          "product_warranty_years": {
+            "type": "number",
+            "required": true,
+            "desc": "Warranty period for the product in years"
+          }
+        },
+        "return_value": "product_warranty_years"
+      },
+      "reducer_policy": {
+        "expected_unit": "years",
+        "method": "single_value",
+        "source_keys": {
+          "values": "product_warranty_years"
+        },
+        "strategy": "max_confidence",
+        "instructions": "Select the highest-confidence warranty period across documents. Prefer official warranty certificates.",
+        "notes": "default instruction added"
+      },
+      "min_documents": 1
+    },
+    "photovoltaic_modules.warranty_certificate.performance": {
+      "doc_category": "Photovoltaic Modules",
+      "doc_subcategory": "Warranty Certificate",
+      "unit": "years",
+      "extraction_contract": {
+        "intermediate": {
+          "performance_warranty_years": {
+            "type": "number",
+            "required": true,
+            "desc": "Warranty period for performance/power in years"
+          }
+        },
+        "return_value": "performance_warranty_years"
+      },
+      "reducer_policy": {
+        "expected_unit": "years",
+        "method": "single_value",
+        "source_keys": {
+          "values": "performance_warranty_years"
+        },
+        "strategy": "max_confidence",
+        "instructions": "Select the highest-confidence performance warranty across documents. Prefer official warranty certificates.",
+        "notes": "default instruction added"
+      },
+      "min_documents": 1
+    },
+    "inverters.warranty_certificate.warranty_years": {
+      "doc_category": "Inverters",
+      "doc_subcategory": "Warranty Certificate",
+      "unit": "years",
+      "extraction_contract": {
+        "intermediate": {
+          "warranty_years": {
+            "type": "number",
+            "required": true,
+            "desc": "Warranty period for the inverter in years"
+          }
+        },
+        "return_value": "warranty_years"
+      },
+      "reducer_policy": {
+        "expected_unit": "years",
+        "method": "single_value",
+        "instructions": "- Consider all documents. Prefer official warranty certificates. Output the explicit warranty period in years and include justification.",
+        "strategy": "max_confidence"
+      },
+      "min_documents": 1
+    },
+    "mounting_structures.coating_certification.certification_present": {
+      "doc_category": "Mounting Structures",
+      "doc_subcategory": "Coating Certification",
+      "unit": "boolean",
+      "extraction_contract": {
+        "intermediate": {
+          "certification_present": {
+            "type": "boolean",
+            "required": true,
+            "desc": "True if coating certification is present and valid (ISO/ASTM or equivalent)"
+          }
+        },
+        "return_value": "certification_present"
+      },
+      "reducer_policy": {
+        "method": "single_value",
+        "expected_unit": "boolean",
+        "strategy": "max_confidence",
+        "instructions": "Select the most reliable indication of coating certification presence across documents."
+      },
+      "min_documents": 1
+    },
+    "mounting_structures.warranty_certificate.warranty_present": {
+      "doc_category": "Mounting Structures",
+      "doc_subcategory": "Warranty Certificate",
+      "unit": "boolean",
+      "extraction_contract": {
+        "intermediate": {
+          "warranty_present": {
+            "type": "boolean",
+            "required": true,
+            "desc": "True if any mounting-structure warranty information exists (years/terms/coverage)."
+          }
+        },
+        "return_value": "warranty_present"
+      },
+      "reducer_policy": {
+        "expected_unit": "boolean",
+        "method": "single_value",
+        "strategy": "max_confidence",
+        "instructions": "- Return true if any authoritative document (warranty certificate, datasheet, contract, proposal) includes warranty information for mounting structures (years/terms). False if no mention across documents."
+      },
+      "min_documents": 1
+    },
+    "mounting_structures.site_corrosion_category.classification_present": {
+      "doc_category": "Mounting Structures",
+      "doc_subcategory": "Site Corrosion Category Report & Climatic/Environmental Data",
+      "unit": "boolean",
+      "extraction_contract": {
+        "intermediate": {
+          "iso_series_match": {
+            "type": "boolean",
+            "required": true,
+            "desc": "Document references ISO 9223/9224/9225/9226."
+          },
+          "corrosivity_class_present": {
+            "type": "boolean",
+            "required": true,
+            "desc": "A corrosivity category is explicitly stated (e.g., C1–C5, CX, CX-M, RC2, etc.)."
+          },
+          "classified_true": {
+            "type": "boolean",
+            "required": true,
+            "desc": "Derived: TRUE iff a corrosivity class is stated and (optionally) tied to ISO 9223 series."
+          },
+          "stated_class_text": {
+            "type": "string",
+            "required": false,
+            "desc": "Exact stated class snippet (e.g., 'ISO 9223: C3')."
+          }
+        },
+        "return_value": "classified_true"
+      },
+      "reducer_policy": {
+        "expected_unit": "boolean",
+        "method": "single_value",
+        "strategy": "max_confidence",
+        "instructions": [
+          "- Return TRUE iff the document explicitly states a corrosivity classification (e.g., C1–C5, CX, CX-M, RC2...) and/or cites ISO 9223/9224/9225/9226.",
+          "- Prefer exact quoted class labels and standards mentions in evidence.",
+          "- If only narrative environmental descriptions exist without an explicit class, return FALSE."
+        ]
+      },
+      "min_documents": 1
+    },
+  
+    "mounting_structures.structural_calculation.report_stamped_present": {
+      "doc_category": "Mounting Structures",
+      "doc_subcategory": "Structural Calculation Report",
+      "unit": "boolean",
+      "extraction_contract": {
+        "intermediate": {
+          "structural_calcs_present": {
+            "type": "boolean",
+            "required": true,
+            "desc": "Explicit structural calculations (member sizing, loads, combinations, checks, etc.) are present."
+          },
+          "engineer_stamp_present": {
+            "type": "boolean",
+            "required": true,
+            "desc": "Professional stamp/seal/signature block is present."
+          },
+          "licensed_engineer_identified": {
+            "type": "boolean",
+            "required": true,
+            "desc": "Name/registration/license no. of a licensed Civil/Structural engineer is present."
+          },
+          "stamped_calc_report_true": {
+            "type": "boolean",
+            "required": true,
+            "desc": "Derived: TRUE iff structural_calcs_present AND engineer_stamp_present AND licensed_engineer_identified are all TRUE."
+          },
+          "engineer_credentials_text": {
+            "type": "string",
+            "required": false,
+            "desc": "Quoted credentials snippet (e.g., 'PE #12345, State of CA')."
+          }
+        },
+        "return_value": "stamped_calc_report_true"
+      },
+      "reducer_policy": {
+        "expected_unit": "boolean",
+        "method": "single_value",
+        "strategy": "max_confidence",
+        "instructions": [
+          "- Return TRUE only if BOTH conditions hold:",
+          "  1) Structural calculations are present (loads, combinations, member/connection checks, etc.),",
+          "  2) The report is signed and stamped by a licensed civil/structural engineer (name and license/registration visible).",
+          "- If either the calculations OR the licensed stamp are missing/uncertain, return FALSE."
+        ]
+      },
+      "min_documents": 1
+    },
+  
+    "mounting_structures.mounting_layout.type_defined": {
+      "doc_category": "Mounting Structures",
+      "doc_subcategory": "Mounting Layout and Type",
+      "unit": "boolean",
+      "extraction_contract": {
+        "intermediate": {
+          "mounting_type_defined": {
+            "type": "boolean",
+            "required": true,
+            "desc": "Document explicitly states mounting type: roof, ground, or floating."
+          },
+          "mounting_type_value": {
+            "type": "string",
+            "required": false,
+            "desc": "Exact text for the mounting type (e.g., 'Roof-mounted ballasted', 'Ground mount – driven piles', 'Floating PV')."
+          },
+          "material_specs_present": {
+            "type": "boolean",
+            "required": false,
+            "desc": "Materials are specified (e.g., aluminum grade, steel grade/coating). Not required for TRUE."
+          },
+          "type_defined_true": {
+            "type": "boolean",
+            "required": true,
+            "desc": "Derived: TRUE iff mounting_type_defined is TRUE (material specs not required by this field)."
+          }
+        },
+        "return_value": "type_defined_true"
+      },
+      "reducer_policy": {
+        "expected_unit": "boolean",
+        "method": "single_value",
+        "strategy": "max_confidence",
+        "instructions": [
+          "- Return TRUE iff the document explicitly defines the mounting type as roof, ground, or floating.",
+          "- Material specs are helpful but NOT required for TRUE in this field.",
+          "- Evidence should quote the exact phrase or sheet title where the mounting type is stated."
+        ]
+      },
+      "min_documents": 1
+    },
+
+
+    "electrical_design.unifilar_diagram.presence_of_inverter_meter_transformer_protection": {
+      "doc_category": "Electrical Design",
+      "doc_subcategory": "Unifilar Diagram",
+      "unit": null,
+      "extraction_contract": {
+        "intermediate": {
+          "inverter_present": {
+            "type": "boolean",
+            "required": true
+          },
+          "meter_present": {
+            "type": "boolean",
+            "required": true
+          },
+          "transformer_present": {
+            "type": "boolean",
+            "required": true
+          },
+          "protection_present": {
+            "type": "boolean",
+            "required": true
+          }
+        },
+        "return_value": [
+          "inverter_present",
+          "meter_present",
+          "transformer_present",
+          "protection_present"
+        ]
+      },
+      "reducer_policy": {
+        "expected_unit": null,
+        "method": "dict_aggregate",
+        "rules": {
+          "inverter_present": "any_true",
+          "meter_present": "any_true",
+          "transformer_present": "any_true",
+          "protection_present": "any_true"
+        },
+        "instructions": [
+          "Return a JSON dict with the four boolean flags (keys listed in return_value).",
+          "Count a component as present only if there is an explicit, authoritative indication (label/symbol in the unifilar, BOM/schedule, or clear textual statement).",
+          "Do not infer presence from generic narratives.",
+          "Conflict policy: if any explicit negative exists (e.g., 'no transformer present'), set that key to false unless there is a stronger, explicit positive (e.g., labeled transformer in the diagram). Note the conflict and lower confidence."
+        ]
+      },
+      "min_documents": 1
+    },
+    "electrical_design.unifilar_diagram.voltage_levels_labeled": {
+      "doc_category": "Electrical Design",
+      "doc_subcategory": "Unifilar Diagram",
+      "unit": "boolean",
+      "extraction_contract": {
+        "intermediate": {
+          "voltage_levels_labeled": {
+            "type": "boolean",
+            "required": true,
+            "desc": "DC, AC, and MV labeled per IEC 60364 / IEEE 141"
+          }
+        },
+        "return_value": "voltage_levels_labeled"
+      },
+      "reducer_policy": {
+        "expected_unit": "boolean",
+        "method": "synthesis",
+        "instructions": "- Return true if DC, AC, and MV voltage levels are labeled; otherwise false. Include justification."
+      },
+      "min_documents": 1
+    },
+    "electrical_design.georeferenced_plans.kmz_polygon_present": {
+      "doc_category": "Electrical Design",
+      "doc_subcategory": "Georeferenced Plans",
+      "unit": "boolean",
+      "extraction_contract": {
+        "intermediate": {
+          "kmz_polygon_present": {
+            "type": "boolean",
+            "required": true,
+            "desc": "KMZ or equivalent site polygon present"
+          }
+        },
+        "return_value": "kmz_polygon_present"
+      },
+      "reducer_policy": {
+        "expected_unit": "boolean",
+        "method": "single_value",
+        "instructions": [
+          "Return true if a georeferenced plan or KMZ/KML with a site polygon is present.",
+          "Treat KMZ/KML as structured evidence (no text snippet). If a KMZ is used as evidence, do not list it under empty_text_docs.",
+          "Include a short justification."
+        ],
+        "strategy": "max_confidence"
+      },
+      "min_documents": 1
+    },
+    "electrical_design.cable_sizing.parameters": {
+      "doc_category": "Electrical Design",
+      "doc_subcategory": "Cable Sizing",
+      "unit": "boolean",
+      "extraction_contract": {
+        "intermediate": {
+          "cable_sizing_considered": {
+            "type": "boolean",
+            "required": true,
+            "desc": "True if cable sizing is explicitly considered (e.g., ampacity/derating, IEC 60287, NEC 310/310.16, AWG/mm², ambient/grouping/thermal)."
+          }
+        },
+        "return_value": "cable_sizing_considered"
+      },
+      "reducer_policy": {
+        "expected_unit": "boolean",
+        "method": "single_value",
+        "strategy": "max_confidence",
+        "instructions": "- Return true if any design document references cable sizing methodology/criteria (IEC 60287, NEC Tables 310.x), conductor gauge (AWG/mm²), ampacity/derating, ambient temperature, grouping, or thermal/soil parameters. False if no evidence."
+      },
+      "min_documents": 1
+    },
+    "electrical_design.voltage_drop.percentage": {
+      "doc_category": "Electrical Design",
+      "doc_subcategory": "Voltage Drop",
+      "unit": "boolean",
+      "extraction_contract": {
+        "intermediate": {
+          "voltage_drop_considered": {
+            "type": "boolean",
+            "required": true,
+            "desc": "True if voltage drop is explicitly considered (calculations, limits, or compliance statements)."
+          }
+        },
+        "return_value": "voltage_drop_considered"
+      },
+      "reducer_policy": {
+        "expected_unit": "boolean",
+        "method": "single_value",
+        "strategy": "max_confidence",
+        "instructions": [
+          "Return true only if at least one document explicitly mentions voltage drop calculations, limits, or compliance.",
+          "Acceptable evidence includes terms like 'voltage drop'/'caída de tensión', explicit VD limits (e.g., DC ≤ 3%, AC ≤ 5%), conductor length/resistance, or a standards-based compliance statement.",
+          "Do not use generic cable-sizing text as a proxy; evidence must directly refer to voltage drop.",
+          "Include a short justification."
+        ]
+      },
+      "min_documents": 1
+    },
+    "electrical_design.grounding_layout.resistance": {
+      "doc_category": "Electrical Design",
+      "doc_subcategory": "Grounding",
+      "unit": "boolean",
+      "extraction_contract": {
+        "intermediate": {
+          "grounding_resistance_considered": {
+            "type": "boolean",
+            "required": true,
+            "desc": "True if grounding resistance is considered (target value, calculation, measurement plan, or compliance statement)."
+          }
+        },
+        "return_value": "grounding_resistance_considered"
+      },
+      "reducer_policy": {
+        "expected_unit": "boolean",
+        "method": "single_value",
+        "strategy": "max_confidence",
+        "instructions": "- Return true if any document mentions grounding resistance targets (e.g., ≤ 5 Ω), calculations (soil resistivity, mesh/ring, rods), measurement/acceptance criteria, or standards-driven statements. False if no evidence."
+      },
+      "min_documents": 1
+    },
+    "mechanical_design.infrastructure_report.present": {
+      "doc_category": "Mechanical Design",
+      "doc_subcategory": "Infrastructure Report",
+      "unit": "boolean",
+      "extraction_contract": {
+        "intermediate": {
+          "report_present": {
+            "type": "boolean",
+            "required": true,
+            "desc": "Document details existing infrastructure condition and availability of space for installing panels/inverters/transformers/switchboards."
+          }
+        },
+        "return_value": "report_present"
+      },
+      "reducer_policy": {
+        "expected_unit": "boolean",
+        "method": "single_value",
+        "strategy": "max_confidence",
+        "instructions": "- Return true if any document clearly describes both (i) condition of existing infrastructure and (ii) space/area available for key equipment (panels, inverters, transformers, switchboards). Otherwise false. Include a short justification."
+      },
+      "min_documents": 1
+    },
+    "mechanical_design.panel_layout.diagram_present": {
+      "doc_category": "Mechanical Design",
+      "doc_subcategory": "Panel Distribution Diagram",
+      "unit": "boolean",
+      "extraction_contract": {
+        "intermediate": {
+          "plan_view": {
+            "type": "boolean",
+            "required": true,
+            "desc": "Document shows a plan-view/roof/site layout (not a single-line)."
+          },
+          "module_blocks_visible": {
+            "type": "boolean",
+            "required": true,
+            "desc": "PV module/array blocks, strings, or module grids are visibly delineated (e.g., rectangles for modules, array labels, kWp per block, row spacing)."
+          },
+          "sheet_title": {
+            "type": "string",
+            "required": false,
+            "desc": "Title block or sheet name (e.g., 'PV LAYOUT', 'PLANO DE DISTRIBUCIÓN DE PANELES', 'PV-101')."
+          },
+          "negative_hit_unifilar_or_electrical": {
+            "type": "boolean",
+            "required": true,
+            "desc": "True if the doc is an electrical unifilar/SLD or unrelated electrical room/grounding sheet (e.g., 'Diagrama Unifilar', 'Single-Line', 'Tomacorrientes', 'SGDA', 'TMC', 'Mallas de puesta a tierra')."
+          }
+        },
+        "return_value": "diagram_present"
+      },
+      "reducer_policy": {
+        "expected_unit": "boolean",
+        "method": "synthesis",
+        "strategy": "max_confidence",
+        "instructions": [
+          "- Return TRUE only if: plan_view = true AND module_blocks_visible = true AND negative_hit_unifilar_or_electrical = false.",
+          "- Otherwise return FALSE.",
+          "- Evidence must cite THIS document (not generic guides) and include the sheet title if available."
+        ]
+      },
+      "min_documents": 1
+    },
+    "mechanical_design.roof_reinforcement.studies_present": {
+      "doc_category": "Mechanical Design",
+      "doc_subcategory": "Roof Reinforcement Studies",
+      "unit": "boolean",
+      "extraction_contract": {
+        "intermediate": {
+          "studies_present": {
+            "type": "boolean",
+            "required": true,
+            "desc": "Roof reinforcement/structural verification for roof mounting is shown or referenced (capacity under panel weight, wind; seismic if applicable). Evidence must cite a structural calculation/report or a document explicitly stating roof capacity for PV loads (e.g., kg/m²) and wind/seismic checks."
+          }
+        },
+        "return_value": "studies_present"
+      },
+      "reducer_policy": {
+        "expected_unit": "boolean",
+        "method": "single_value",
+        "strategy": "max_confidence",
+        "instructions": "- Return true if any document includes roof reinforcement or structural verification studies for roof-mounted PV. Otherwise false. Include a short justification."
+      },
+      "min_documents": 1
+    },
+    "mechanical_design.civil_site_studies.reports_present": {
+      "doc_category": "Mechanical Design",
+      "doc_subcategory": "Hydrological & Geotechnical Reports",
+      "unit": "boolean",
+      "extraction_contract": {
+        "intermediate": {
+          "reports_present": {
+            "type": "boolean",
+            "required": true,
+            "desc": "Hydrological and/or geotechnical reports are attached addressing load-bearing capacity, wind zone, and seismic zone."
+          }
+        },
+        "return_value": "reports_present"
+      },
+      "reducer_policy": {
+        "expected_unit": "boolean",
+        "method": "single_value",
+        "strategy": "max_confidence",
+        "instructions": "- Return true if any attached document is a hydrological and/or geotechnical report (or equivalent civil study) that addresses load-bearing capacity and wind/seismic zoning. Otherwise false. Include a short justification. Evidence must be a civil/hydrological/geotechnical report addressing bearing capacity and wind/seismic classification; generic solar permitting guides are insufficient."
+      },
+      "min_documents": 1
+    },
+    "mechanical_design.panel_layout.diagram_present": {
+      "doc_category": "Mechanical Design",
+      "doc_subcategory": "Panel Distribution Diagram",
+      "unit": "boolean",
+      "extraction_contract": {
+        "intermediate": {
+          "plan_view": {"type": "boolean", "required": true},
+          "module_blocks_visible": {"type": "boolean", "required": true},
+          "sheet_title": {"type": "string", "required": false},
+          "negative_hit_unifilar_or_electrical": {"type": "boolean", "required": true}
+        },
+        "return_value": "diagram_present"
+      },
+      "reducer_policy": {
+        "expected_unit": "boolean",
+        "value_type": "boolean",
+        "method": "synthesis",
+        "strategy": "max_confidence",
+        "instructions": [
+          "- Return TRUE only if: plan_view = true AND module_blocks_visible = true AND negative_hit_unifilar_or_electrical = false.",
+          "- Evidence must cite THIS document (sheet title or illustration number).",
+          "- Do not use generic permitting guides as evidence.",
+          "- Do not make up information."
+        ]
+      },
+      "min_documents": 1
+    },
+    "scada.architecture.diagram_present": {
+      "doc_category": "SCADA Systems",
+      "doc_subcategory": "SCADA Architecture",
+      "unit": "boolean",
+      "extraction_contract": {
+        "intermediate": {
+          "scada_architecture_present": { "type": "boolean", "required": true, "desc": "True if any SCADA/monitoring/network topology diagram is present (diagram/topología/arquitectura)" }
+        },
+        "return_value": "scada_architecture_present"
+      },
+      "reducer_policy": {
+        "expected_unit": "boolean",
+        "method": "single_value",
+        "strategy": "max_confidence",
+        "instructions": "- Return true only if a SCADA/communications architecture diagram is shown. PPC/Plant Controller is NOT required for this field. Include a short justification."
+      },
+      "min_documents": 1
+    },
+    "scada.communication.protocol_and_taglist_present": {
+      "doc_category": "SCADA",
+      "doc_subcategory": "Communication",
+      "unit": "boolean",
+      "extraction_contract": {
+        "intermediate": {
+          "protocol_and_taglist_present": {"type": "boolean", "required": true}
+        },
+        "return_value": "protocol_and_taglist_present"
+      },
+      "reducer_policy": {
+        "expected_unit": "boolean",
+        "value_type": "boolean",
+        "method": "single_value",
+        "strategy": "max_confidence",
+        "instructions": [
+          "- Return TRUE only if BOTH are present:",
+          "  1. Explicit SCADA/PLC/RTU communication protocol (e.g., Modbus RTU/TCP, OPC-UA).",
+          "  2. Tag list or monitoring points (e.g., ShineServer data map).",
+          "- Evidence must cite the specific diagram/table/section (e.g., 'Ilustración 3 – Diagrama RS485', 'Tabla 2 – ShineServer Specs'). In all other scenarios return FALSE",
+          "- Do not make up information."
+        ]
+      },
+      "min_documents": 1
+    },
+    "scada.meteorological_station.included_calibrated_sensors": {
+      "doc_category": "SCADA Systems",
+      "doc_subcategory": "Meteorological Station",
+      "unit": "boolean",
+      "extraction_contract": {
+        "intermediate": {
+          "station_present":   { "type": "boolean", "required": true, "desc": "Explicit 'estación meteorológica'/'meteorological station' present." },
+          "pyranometer_present": { "type": "boolean", "required": true, "desc": "Explicit 'piranómetro'/'pyranometer' present." },
+          "soiling_sensor_present": { "type": "boolean", "required": true, "desc": "Explicit 'sensor de ensuciamiento'/'soiling sensor' present." },
+          "calibration_confirmed": { "type": "boolean", "required": true, "desc": "Explicit 'calibrado'/'certificado de calibración'/'calibration certificate' present." },
+          "met_sensors_ok":    { "type": "boolean", "required": true, "desc": "Derived: TRUE only if ALL four booleans above are TRUE." }
+        },
+        "return_value": "met_sensors_ok"
+      },
+      "reducer_policy": {
+        "expected_unit": "boolean",
+        "method": "single_value",
+        "strategy": "max_confidence",
+        "instructions": [
+          "- Return TRUE only if station_present, pyranometer_present, soiling_sensor_present, and calibration_confirmed are all TRUE.",
+          "- Otherwise return FALSE. Do NOT fabricate negative quotes; return FALSE when using absence-of-evidence.",
+          "- Do not make up information."
+        ]
+      },
+      "min_documents": 1
+    }
+  }
+}
