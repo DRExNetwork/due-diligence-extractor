@@ -48,6 +48,13 @@ Production‑ready layout with clean separation of concerns:
 
 ## Quick Start
 
+Run the following install
+
+```bash
+pip install -e .
+```
+followed by a command, e.g.
+
 ```bash
 # env
 export OPENAI_API_KEY=sk-...
