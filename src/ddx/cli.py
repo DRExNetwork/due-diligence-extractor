@@ -5,33 +5,71 @@ from pathlib import Path
 from ddx.config.fields import load_field_config, build_registry_from_field_config, index_registry
 from ddx.orchestrator import run_for_fields
 from ddx.storage.json_store import save_json_outputs
+from ddx.evaluator.brand_compliance import evaluate_brand_compliance, evaluate_inverter_compliance
+
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--field-config", default=str(Path(__file__).resolve().parents[2] / "config" / "fields.json"),
-                    help="Path to fields.json config")
-    ap.add_argument("--docs-dir", default=None, help="Directory with source documents (.txt/.csv/.pdf/.kmz)")
-    ap.add_argument("--fields", nargs="+", required=True, help="Field keys to extract")
+    ap.add_argument(
+        "--field-config",
+        default=str(Path(__file__).resolve().parents[2] / "config" / "fields.json"),
+        help="Path to fields.json config",
+    )
+    ap.add_argument(
+        "--docs-dir", default=None, help="Directory with source documents (.txt/.csv/.pdf/.kmz)"
+    )
+    ap.add_argument("--fields", nargs="+", help="Field keys to extract")
 
     # LLM
     ap.add_argument("--provider", default="openai", help="LLM provider (default: openai)")
     ap.add_argument("--model", default="", help="LLM model name override (else env LLM_MODEL)")
 
     # OCR
-    ap.add_argument("--ocr", action="store_true", help="Enable OCR fallback when PDFs have no text layer")
+    ap.add_argument(
+        "--ocr", action="store_true", help="Enable OCR fallback when PDFs have no text layer"
+    )
     ap.add_argument("--ocr-lang", default="spa+eng", help="Tesseract languages (e.g., 'spa+eng')")
     ap.add_argument("--ocr-dpi", type=int, default=300, help="Render DPI for OCR")
 
     # Progress
-    ap.add_argument("--progress", action="store_true", help="Show file reading / OCR / LLM progress")
+    ap.add_argument(
+        "--progress", action="store_true", help="Show file reading / OCR / LLM progress"
+    )
 
     # JSON storage
-    ap.add_argument("--store-dir", default=str(Path(__file__).resolve().parents[2] / "store"),
-                    help="Directory to persist outputs (JSON + per-field snapshots)")
-    ap.add_argument("--project-id", default="default_project", help="Namespace for run/field snapshots")
+    ap.add_argument(
+        "--store-dir",
+        default=str(Path(__file__).resolve().parents[2] / "store"),
+        help="Directory to persist outputs (JSON + per-field snapshots)",
+    )
+    ap.add_argument(
+        "--project-id", default="default_project", help="Namespace for run/field snapshots"
+    )
     ap.add_argument("--run-id", default=None, help="Optional run id; defaults to UTC timestamp")
 
+    # Brand compliance flags
+    ap.add_argument(
+        "--solar-panel-brand",
+        type=str,
+        help="Evaluate solar panel brand compliance (e.g., 'Trina Solar')",
+    )
+    ap.add_argument(
+        "--inverter-brand", type=str, help="Evaluate inverter brand compliance (e.g., 'Sungrow')"
+    )
+
     args = ap.parse_args()
+
+    # Handle solar panel brand compliance
+    if args.solar_panel_brand:
+        result = evaluate_brand_compliance(args.solar_panel_brand)
+        print(json.dumps(result, indent=2))
+        return
+
+    # Handle inverter brand compliance
+    if args.inverter_brand:
+        result = evaluate_inverter_compliance(args.inverter_brand)
+        print(json.dumps(result, indent=2))
+        return
 
     store_dir = Path(args.store_dir)
     store_dir.mkdir(parents=True, exist_ok=True)
@@ -44,10 +82,15 @@ def main():
     docs_dir = Path(args.docs_dir) if args.docs_dir else None
 
     out = run_for_fields(
-        registry_idx, args.fields, docs_dir,
-        provider=args.provider, model=args.model,
+        registry_idx,
+        args.fields,
+        docs_dir,
+        provider=args.provider,
+        model=args.model,
         progress=args.progress,
-        ocr=args.ocr, ocr_lang=args.ocr_lang, ocr_dpi=args.ocr_dpi
+        ocr=args.ocr,
+        ocr_lang=args.ocr_lang,
+        ocr_dpi=args.ocr_dpi,
     )
 
     args_meta = {
