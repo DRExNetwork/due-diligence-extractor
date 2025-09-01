@@ -2,6 +2,7 @@
 from __future__ import annotations
 from typing import Any, Dict
 
+
 def _to_float(x):
     if x is None:
         return None
@@ -23,26 +24,33 @@ def _to_float(x):
         return x
     return None
 
+
 def _normalize_single_doc_output(fn: str, doc_text: str, j_norm: dict, inter_spec: dict) -> dict:
     evs_struct = [e for e in (j_norm.get("evidence_structured") or []) if isinstance(e, dict)]
-    has_any_real = any((isinstance(e.get("snippet"), str) and e.get("snippet").strip()) for e in evs_struct)
+    has_any_real = any(
+        (isinstance(e.get("snippet"), str) and e.get("snippet").strip()) for e in evs_struct
+    )
     if not evs_struct or not has_any_real:
         evs_struct = []
-        for e in (j_norm.get("evidence") or []):
+        for e in j_norm.get("evidence") or []:
             if isinstance(e, dict):
                 sn = (e.get("snippet") or "")[:240]
-                evs_struct.append({
-                    "doc": e.get("doc") or fn,
-                    "page": e.get("page"),
-                    "snippet": sn if sn else None,
-                })
+                evs_struct.append(
+                    {
+                        "doc": e.get("doc") or fn,
+                        "page": e.get("page"),
+                        "snippet": sn if sn else None,
+                    }
+                )
             elif isinstance(e, str):
                 evs_struct.append({"doc": fn, "page": None, "snippet": (e[:240] or None)})
     j_norm["evidence_structured"] = evs_struct
     return j_norm
 
+
 def normalize_single_doc_output(fn: str, doc_text: str, j_norm: dict, inter_spec: dict) -> dict:
     return _normalize_single_doc_output(fn, doc_text, j_norm, inter_spec)
+
 
 def normalize_per_doc(doc_json: dict, field_cfg: dict) -> dict:
     ec = (field_cfg or {}).get("extraction_contract", {}) or {}
@@ -72,10 +80,10 @@ def normalize_per_doc(doc_json: dict, field_cfg: dict) -> dict:
         "evidence": doc_json.get("evidence") or [],
         "evidence_structured": doc_json.get("evidence_structured") or [],
         "confidence": float(doc_json.get("confidence") or 0),
-        "notes": doc_json.get("notes") or []
+        "notes": doc_json.get("notes") or [],
     }
 
-    got = (doc_json.get("intermediate") or {})
+    got = doc_json.get("intermediate") or {}
     if isinstance(got, dict):
         for k in allowed:
             if k in got:
@@ -83,7 +91,7 @@ def normalize_per_doc(doc_json: dict, field_cfg: dict) -> dict:
 
     if "rate_usd_per_kwh" in allowed:
         rate = out["intermediate"].get("rate_usd_per_kwh")
-        kwh  = out["intermediate"].get("monthly_kwh")
+        kwh = out["intermediate"].get("monthly_kwh")
         cost = out["intermediate"].get("energy_charge_usd")
         if rate is None and kwh and cost:
             try:

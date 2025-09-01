@@ -3,6 +3,7 @@ from __future__ import annotations
 import json, re
 from typing import Any
 
+
 def _json_loads_lenient(s: str) -> Any:
     try:
         return json.loads(s)

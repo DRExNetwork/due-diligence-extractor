@@ -58,6 +58,7 @@ followed by a command, e.g.
 ```bash
 # env
 export OPENAI_API_KEY=sk-...
+export TAVILY_API_KEY=tvly-....
 export LLM_MODEL=gpt-4o-mini
 
 python scripts/ai_doc_reader.py \
