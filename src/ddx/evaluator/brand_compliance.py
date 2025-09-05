@@ -135,7 +135,7 @@ def evaluate_brand_compliance(brand_name: str) -> Dict[str, Any]:
             if not raw_content:
                 continue
 
-            print(f"    Analyzing PDF: {url}")
+            # print(f"    Analyzing PDF: {url}")
 
             # Analyze PDF content with LLM
             analysis_prompt = f"""
