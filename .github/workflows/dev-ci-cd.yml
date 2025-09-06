@@ -31,7 +31,7 @@ jobs:
       - name: Build, tag, and push docker image to Amazon ECR with "latest" tag
         env:
           REGISTRY: ${{ steps.login-ecr.outputs.registry }}
-          REPOSITORY: dev/drex/dueDiligence
+          REPOSITORY: dev/drex/duediligence
         run: |
           docker build -t $REGISTRY/$REPOSITORY:latest .
           docker push $REGISTRY/$REPOSITORY:latest
