@@ -42,7 +42,9 @@ class Settings(BaseModel):
     default_provider: str = os.getenv("DEFAULT_PROVIDER", "openai")
     default_model: str = os.getenv("DEFAULT_MODEL", "gpt-4o-mini")
     log_level: str = os.getenv("LOG_LEVEL", "INFO")
-    s3_bucket: str = os.getenv("S3_BUCKET", "")  # Default bucket name if not provided in request
+    s3_bucket: str = os.getenv(
+        "S3_BUCKET", "drex-network"
+    )  # Default bucket name if not provided in request
 
 
 settings = Settings()

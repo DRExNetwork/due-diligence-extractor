@@ -43,7 +43,6 @@ def evaluate_brand_compliance(brand_name: str) -> Dict[str, Any]:
         "factory_reports": {"score": 0.0, "evidence": "Not found", "weight": 0.10},
         "bankability": {"score": 0.0, "evidence": "Not found", "weight": 0.10},
         "overall_score": 0.0,
-        "web_searches_performed": [],
     }
 
     # Define IEC standards to check
@@ -107,15 +106,6 @@ def evaluate_brand_compliance(brand_name: str) -> Dict[str, Any]:
             max_results=3,
             include_answer="advanced",
             include_raw_content="text",
-        )
-
-        result["web_searches_performed"].append(
-            {
-                "standard": iec["code"],
-                "query": iec["pdf_query"],
-                "search_type": "PDF",
-                "results_count": len(pdf_search_results.get("results", [])),
-            }
         )
 
         # Try each PDF result
@@ -213,15 +203,6 @@ def evaluate_brand_compliance(brand_name: str) -> Dict[str, Any]:
                 max_results=2,
                 include_answer="advanced",
                 include_raw_content="text",
-            )
-
-            result["web_searches_performed"].append(
-                {
-                    "standard": iec["code"],
-                    "query": iec["url_query"],
-                    "search_type": "URL",
-                    "results_count": len(url_search_results.get("results", [])),
-                }
             )
 
             # Try each URL result
@@ -383,14 +364,6 @@ def evaluate_brand_compliance(brand_name: str) -> Dict[str, Any]:
         include_raw_content="text",
     )
 
-    result["web_searches_performed"].append(
-        {
-            "type": "bankability_pdf",
-            "query": bankability_pdf_query,
-            "results_count": len(bank_pdf_search.get("results", [])),
-        }
-    )
-
     found_bank = False
     bank_search_type = "not_found"
 
@@ -485,14 +458,6 @@ def evaluate_brand_compliance(brand_name: str) -> Dict[str, Any]:
             max_results=2,
             include_answer="advanced",
             include_raw_content="text",
-        )
-
-        result["web_searches_performed"].append(
-            {
-                "type": "bankability_url",
-                "query": bankability_url_query,
-                "results_count": len(bank_url_search.get("results", [])),
-            }
         )
 
         for sr in bank_url_search.get("results", []):
@@ -634,7 +599,6 @@ def evaluate_inverter_compliance(inverter_brand: str) -> Dict[str, Any]:
         },
         "iec_inverter_certificates": {},
         "overall_score": 0.0,
-        "web_searches_performed": [],
     }
 
     # Define IEC inverter standards with both PDF and URL queries
@@ -690,15 +654,6 @@ def evaluate_inverter_compliance(inverter_brand: str) -> Dict[str, Any]:
             max_results=3,
             include_answer="advanced",
             include_raw_content="text",
-        )
-
-        result["web_searches_performed"].append(
-            {
-                "standard": iec["code"],
-                "query": iec["pdf_query"],
-                "search_type": "PDF",
-                "results_count": len(pdf_search_results.get("results", [])),
-            }
         )
 
         # Try each PDF result
@@ -791,15 +746,6 @@ def evaluate_inverter_compliance(inverter_brand: str) -> Dict[str, Any]:
                 max_results=2,
                 include_answer="advanced",
                 include_raw_content="text",
-            )
-
-            result["web_searches_performed"].append(
-                {
-                    "standard": iec["code"],
-                    "query": iec["url_query"],
-                    "search_type": "URL",
-                    "results_count": len(url_search_results.get("results", [])),
-                }
             )
 
             # Try each URL result
