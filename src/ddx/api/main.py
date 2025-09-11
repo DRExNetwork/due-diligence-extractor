@@ -12,7 +12,7 @@ from fastapi import FastAPI, HTTPException, Depends, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
-
+import asyncio
 from ddx.config.fields import (
     load_field_config,
     build_registry_from_field_config,
@@ -174,40 +174,35 @@ def _validate_fields(requested: List[str], registry_idx: Dict[str, Any]):
         )
 
 
-def download_s3_files(file_paths: List[str], bucket: Optional[str]) -> Path:
-    """Download files from S3 to a temporary directory."""
+async def download_s3_files_async(file_paths: List[str], bucket: Optional[str]) -> Path:
+    """Async download of files from S3 to a temporary directory."""
     try:
-        import boto3
+        import aioboto3
+        from botocore.config import Config
     except ImportError:
-        raise HTTPException(status_code=500, detail="boto3 not installed")
+        raise HTTPException(status_code=500, detail="aioboto3 not installed")
 
-    # Use provided bucket or fall back to env setting
     bucket_name = bucket or settings.s3_bucket
     if not bucket_name:
         raise HTTPException(status_code=400, detail="No S3 bucket specified")
 
-    s3 = boto3.client("s3")
-
-    # Create temporary directory
     temp_dir = settings.store_dir / "_temp" / str(uuid.uuid4())
     temp_dir.mkdir(parents=True, exist_ok=True)
 
-    for file_path in file_paths:
-        # Clean the path (remove leading slash if present)
-        clean_path = file_path.lstrip("/")
-        filename = Path(clean_path).name
-        local_path = temp_dir / filename
+    session = aioboto3.Session()
+    cfg = Config(max_pool_connections=int(os.getenv("S3_MAX_POOL", "50")))
+    async with session.client("s3", config=cfg) as s3:
 
-        try:
-            s3.download_file(bucket_name, clean_path, str(local_path))
-            log.debug(f"Downloaded s3://{bucket_name}/{clean_path} to {local_path}")
-        except Exception as e:
-            # Clean up on failure
-            print(e)
-            shutil.rmtree(temp_dir, ignore_errors=True)
-            raise HTTPException(
-                status_code=500, detail=f"Failed to download {clean_path}: {str(e)}"
-            )
+        async def _dl(path: str):
+            clean_path = path.lstrip("/")
+            filename = Path(clean_path).name
+            local_path = temp_dir / filename
+            try:
+                await s3.download_file(bucket_name, clean_path, str(local_path))
+            except Exception as e:
+                raise HTTPException(status_code=500, detail=f"Failed to download {clean_path}: {e}")
+
+        await asyncio.gather(*(_dl(p) for p in file_paths))
 
     return temp_dir
 
@@ -235,7 +230,7 @@ async def parse_fields(req: ParseFieldsRequest, registry_idx=Depends(get_registr
 
     try:
         # Download files to temporary directory
-        temp_dir = download_s3_files(req.file_paths, req.bucket)
+        temp_dir = await download_s3_files_async(req.file_paths, req.bucket)
 
         # Validate requested fields
         _validate_fields(req.fields, registry_idx)
@@ -302,5 +297,4 @@ if __name__ == "__main__":
         "ddx.api.main:app",
         host="0.0.0.0",
         port=int(os.getenv("PORT", "8000")),
-        reload=bool(os.getenv("RELOAD", "1") == "1"),
     )
