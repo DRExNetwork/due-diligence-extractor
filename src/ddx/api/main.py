@@ -149,13 +149,66 @@ app.add_middleware(
 @app.middleware("http")
 async def log_requests(request: Request, call_next):
     req_id = f"{datetime.now().isoformat()}-{id(request)}"
-    log.debug("REQ %s %s %s", req_id, request.method, request.url.path)
+    log.info("Request: %s %s %s", req_id, request.method, request.url.path)
+    start_time = datetime.now()
+
     try:
         response = await call_next(request)
-        log.debug("RES %s %s %s", req_id, response.status_code, request.url.path)
+        duration = (datetime.now() - start_time).total_seconds()
+
+        # Log error status codes prominently
+        if response.status_code >= 400:
+            # Read the response body for error details
+            body = b""
+            async for chunk in response.body_iterator:
+                body += chunk
+
+            # Try to decode and log the error detail
+            try:
+                import json
+
+                error_detail = json.loads(body.decode())
+                log.error(
+                    "Response: %s %s %s - Status: %d - Detail: %s - Duration: %.3fs",
+                    req_id,
+                    request.method,
+                    request.url.path,
+                    response.status_code,
+                    error_detail.get("detail", "No detail"),
+                    duration,
+                )
+            except:
+                log.error(
+                    "Response: %s %s %s - Status: %d - Duration: %.3fs",
+                    req_id,
+                    request.method,
+                    request.url.path,
+                    response.status_code,
+                    duration,
+                )
+
+            # Reconstruct response with the body
+            from starlette.responses import Response
+
+            return Response(
+                content=body,
+                status_code=response.status_code,
+                headers=dict(response.headers),
+                media_type=response.media_type,
+            )
+        else:
+            log.info(
+                "Response: %s %s %s - Status: %d - Duration: %.3fs",
+                req_id,
+                request.method,
+                request.url.path,
+                response.status_code,
+                duration,
+            )
         return response
     except Exception as e:
-        log.exception("Unhandled error for req %s: %s", req_id, e)
+        duration = (datetime.now() - start_time).total_seconds()
+        log.exception("Unhandled error for req %s: %s - Duration: %.3fs", req_id, e, duration)
         raise
 
 
@@ -165,13 +218,14 @@ async def log_requests(request: Request, call_next):
 
 
 def _validate_fields(requested: List[str], registry_idx: Dict[str, Any]):
-    print(registry_idx)
     unknown = [f for f in requested if f not in registry_idx]
     if unknown:
+        log.error(f"Unknown fields: {unknown}")
         raise HTTPException(
             status_code=400,
             detail=f"Unknown field keys: {unknown}",
         )
+    log.info("All fields validated successfully")
 
 
 async def download_s3_files_async(file_paths: List[str], bucket: Optional[str]) -> Path:
@@ -230,10 +284,17 @@ async def parse_fields(req: ParseFieldsRequest, registry_idx=Depends(get_registr
 
     try:
         # Download files to temporary directory
-        temp_dir = await download_s3_files_async(req.file_paths, req.bucket)
+        try:
+            temp_dir = await download_s3_files_async(req.file_paths, req.bucket)
+            log.info(f"Downloaded files to: {temp_dir}")
+        except Exception as e:
+            log.error(f"S3 download failed: {type(e).__name__}: {str(e)}")
+            raise
 
         # Validate requested fields
         _validate_fields(req.fields, registry_idx)
+
+        log.info(f"Processing fields: {req.fields}")
 
         provider = req.provider or settings.default_provider
         model = req.model or settings.default_model
