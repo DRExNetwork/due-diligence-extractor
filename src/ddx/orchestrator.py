@@ -9,32 +9,40 @@ from ddx.reducer.policy import reduce_by_policy
 from ddx.ingestion.files import discover_files, read_doc_pages
 from ddx.utils.progress import _progress_print
 
+
 def _llm_client(provider: str, model: str):
     return LLMClient(provider=provider, model=model or None)
 
-def llm_extract_single_doc(field: Dict[str, Any], doc_text: str, provider: str, model: str, filename: str = None) -> Dict[str, Any]:
+
+def llm_extract_single_doc(
+    field: Dict[str, Any], doc_text: str, provider: str, model: str, filename: str = None
+) -> Dict[str, Any]:
     client = _llm_client(provider, model)
     prompt = build_prompt_single_doc(field, filename)
     if len(doc_text) > 12000:
         doc_text = doc_text[:12000] + "\\n[...truncated...]"
     messages = [
         {"role": "system", "content": "Return ONLY valid JSON matching the schema. No prose."},
-        {"role": "user", "content": f"{prompt}\\n\\nDocument:\\n{doc_text}"}
+        {"role": "user", "content": f"{prompt}\\n\\nDocument:\\n{doc_text}"},
     ]
     raw = client.chat(messages, response_format={"type": "json_object"})
     from ddx.utils.json import _json_loads_lenient
+
     return _json_loads_lenient(raw)
 
-def run_for_fields(registry_idx: Dict[str, Dict[str, Any]],
-                   fields: List[str],
-                   docs_dir: Optional[Path],
-                   provider: str = "openai",
-                   model: str = "",
-                   progress: bool = False,
-                   *,
-                   ocr: bool = False,
-                   ocr_lang: str = "spa+eng",
-                   ocr_dpi: int = 300) -> Dict[str, Any]:
+
+def run_for_fields(
+    registry_idx: Dict[str, Dict[str, Any]],
+    fields: List[str],
+    docs_dir: Optional[Path],
+    provider: str = "openai",
+    model: str = "",
+    progress: bool = False,
+    *,
+    ocr: bool = False,
+    ocr_lang: str = "spa+eng",
+    ocr_dpi: int = 300,
+) -> Dict[str, Any]:
     results: List[Dict[str, Any]] = []
     llm_client = _llm_client(provider=provider, model=model)
 
@@ -53,25 +61,27 @@ def run_for_fields(registry_idx: Dict[str, Dict[str, Any]],
         files = discover_files(docs_dir)
         _progress_print(0, len(files), "Reading", "(start)", enabled=progress)
         if not files:
-            results.append({
-                "key": key,
-                "meta": {
-                    "section": meta.get("Sections"),
-                    "document": meta.get("Sub Section/Document"),
-                    "data_point": meta.get("Data Point"),
-                    "category": meta.get("Category"),
-                    "weight": meta.get("Weight"),
-                },
-                "prompt": "(n/a)",
-                "value": None,
-                "unit": None,
-                "justification": "",
-                "confidence": 0.0,
-                "evidence": [],
-                "files_processed": [],
-                "files_count": 0,
-                "empty_text_docs": []
-            })
+            results.append(
+                {
+                    "key": key,
+                    "meta": {
+                        "section": meta.get("Sections"),
+                        "document": meta.get("Sub Section/Document"),
+                        "data_point": meta.get("Data Point"),
+                        "category": meta.get("Category"),
+                        "weight": meta.get("Weight"),
+                    },
+                    "prompt": "(n/a)",
+                    "value": None,
+                    "unit": None,
+                    "justification": "",
+                    "confidence": 0.0,
+                    "evidence": [],
+                    "files_processed": [],
+                    "files_count": 0,
+                    "empty_text_docs": [],
+                }
+            )
             continue
 
         doc_texts: Dict[str, str] = {}
@@ -79,7 +89,9 @@ def run_for_fields(registry_idx: Dict[str, Dict[str, Any]],
         total = len(files)
         for i, pth in enumerate(files, start=1):
             _progress_print(i, total, "Reading", pth.name, enabled=progress)
-            pages = read_doc_pages(pth, ocr=ocr, ocr_lang=ocr_lang, ocr_dpi=ocr_dpi, progress=progress)
+            pages = read_doc_pages(
+                pth, ocr=ocr, ocr_lang=ocr_lang, ocr_dpi=ocr_dpi, progress=progress
+            )
             if pth.suffix.lower() == ".kmz":
                 txt = "\\n".join(pages)
                 if not any((s or "").strip() for s in pages):
@@ -116,7 +128,7 @@ def run_for_fields(registry_idx: Dict[str, Dict[str, Any]],
             j_norm["_doc_index"] = idx
             j_norm["_filename"] = fn
 
-            inter_spec = ((fcfg.get("extraction_contract") or {}).get("intermediate") or {})
+            inter_spec = (fcfg.get("extraction_contract") or {}).get("intermediate") or {}
             j_norm = _normalize_single_doc_output(fn, txt, j_norm, inter_spec)
 
             per_doc_outputs.append(j_norm)
@@ -127,7 +139,7 @@ def run_for_fields(registry_idx: Dict[str, Dict[str, Any]],
                 field_key=key,
                 field_def=fcfg,
                 intermediate_results=per_doc_outputs,
-                llm_client=llm_client
+                llm_client=llm_client,
             )
         except Exception as e:
             det = {
@@ -136,7 +148,7 @@ def run_for_fields(registry_idx: Dict[str, Dict[str, Any]],
                 "justification": f"Reducer failed: {e}",
                 "evidence": [],
                 "confidence": 0.0,
-                "notes": ["Reducer exception"]
+                "notes": ["Reducer exception"],
             }
 
         value = det.get("value")
@@ -144,20 +156,22 @@ def run_for_fields(registry_idx: Dict[str, Dict[str, Any]],
 
         structured: List[Dict[str, Any]] = []
         for d in per_doc_outputs:
-            for e in (d.get("evidence_structured") or []):
+            for e in d.get("evidence_structured") or []:
                 structured.append(e)
 
         llm_evidence = []
-        for e in (det.get("evidence") or []):
+        for e in det.get("evidence") or []:
             if isinstance(e, str):
                 llm_evidence.append({"doc": None, "page": None, "snippet": e})
             elif isinstance(e, dict):
                 llm_evidence.append(e)
 
         evidence = structured or llm_evidence
+
         def _is_generic(name: Optional[str]) -> bool:
             n = (name or "").lower()
             return any(s in n for s in ["guidebook", "permitting", "manual", "code"])
+
         proj_ev = [e for e in evidence if not _is_generic(e.get("doc"))]
         if proj_ev:
             evidence = proj_ev
@@ -181,7 +195,7 @@ def run_for_fields(registry_idx: Dict[str, Dict[str, Any]],
             "files_processed": list(doc_texts.keys()),
             "files_count": len(doc_texts),
             "empty_text_docs": empty_text_docs,
-            "intermediate_per_doc": per_doc_outputs
+            "intermediate_per_doc": per_doc_outputs,
         }
 
         results.append(result)

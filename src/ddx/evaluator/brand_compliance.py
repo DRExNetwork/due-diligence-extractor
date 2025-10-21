@@ -104,40 +104,40 @@ def evaluate_brand_compliance(brand_name: str) -> Dict[str, Any]:
             "description": "Outdoor durability & mechanical integrity",
             "mandatory": True,
             "weight": 0.10,
-            "pdf_query": f"IEC 61215 {brand_name} solar module certification filetype:pdf",
-            "url_query": f"Does {brand_name} solar module have IEC 61215 certification? -filetype:pdf",
+            "pdf_query": "{brand_name} solar module IEC 61215 certificate  filetype:pdf",
+            "url_query": "Does {brand_name} solar module have IEC 61215 certification? -filetype:pdf",
         },
         {
             "code": "IEC 61730",
             "description": "Electrical safety",
             "mandatory": True,
             "weight": 0.10,
-            "pdf_query": f"IEC 61730 {brand_name} solar module electrical safety certification filetype:pdf",
-            "url_query": f"Does {brand_name} solar module comply with IEC 61730 electrical safety standard? -filetype:pdf",
+            "pdf_query": "{brand_name} solar module IEC 61730 certificate  filetype:pdf",
+            "url_query": "Does {brand_name} solar module comply with IEC 61730 electrical safety standard? -filetype:pdf",
         },
         {
             "code": "IEC TS 62804",
             "description": "PID resistance",
             "mandatory": False,
             "weight": 0.05,
-            "pdf_query": f"IEC TS 62804 {brand_name} solar module PID resistance test report filetype:pdf",
-            "url_query": f"Is {brand_name} solar module tested for IEC TS 62804 PID resistance? -filetype:pdf",
+            "pdf_query": "{brand_name} solar module IEC TS 62804 certificate  filetype:pdf",
+            "url_query": "Is {brand_name} solar module tested for IEC TS 62804 PID resistance? -filetype:pdf",
         },
         {
             "code": "IEC 62716",
             "description": "Ammonia corrosion resistance",
             "mandatory": False,
             "weight": 0.05,
-            "pdf_query": f"IEC 62716 {brand_name} solar module ammonia corrosion resistance certification filetype:pdf",
-            "url_query": f"Does {brand_name} solar module comply with IEC 62716 ammonia corrosion resistance? -filetype:pdf",
+            "pdf_query": "{brand_name} solar module IEC 62716 certificate filetype:pdf",
+            "url_query": "Does {brand_name} solar module comply with IEC 62716 ammonia corrosion resistance? -filetype:pdf",
         },
         {
             "code": "IEC 61701",
             "description": "Salt mist corrosion resistance",
             "mandatory": False,
             "weight": 0.05,
-            "pdf_query": f"IEC 61701 {brand_name} solar module salt mist corrosion resistance certification filetype:pdf",
-            "url_query": f"Does {brand_name} solar module comply with IEC 61701 salt mist corrosion resistance? -filetype:pdf",
+            "pdf_query": "{brand_name} solar module IEC 61701 certificate filetype:pdf",
+            "url_query": "Does {brand_name} solar module comply with IEC 61701 salt mist corrosion resistance? -filetype:pdf",
         },
     ]
 
@@ -532,32 +532,32 @@ def evaluate_inverter_compliance(inverter_brand: str) -> Dict[str, Any]:
             "description": "Safety requirements for power converters used in photovoltaic systems",
             "mandatory": True,
             "weight": 0.10,
-            "pdf_query": f"IEC 62109 {inverter_brand} inverter safety certification filetype:pdf",
-            "url_query": f"Does {inverter_brand} inverter comply with IEC 62109 safety standard? -filetype:pdf",
+            "pdf_query": "{brand_name} inverter IEC 62109 certificate filetype:pdf",
+            "url_query": "Does {brand_name} inverter comply with IEC 62109 safety standard? -filetype:pdf",
         },
         {
             "code": "IEC 61727",
             "description": "Photovoltaic systems' interface with the grid (grid code compliance)",
             "mandatory": True,
             "weight": 0.10,
-            "pdf_query": f"IEC 61727 {inverter_brand} inverter grid code certification filetype:pdf",
-            "url_query": f"Does {inverter_brand} inverter comply with IEC 61727 grid code standard? -filetype:pdf",
+            "pdf_query": "{brand_name} inverter IEC 61727 certificate filetype:pdf",
+            "url_query": "Does {brand_name} inverter comply with IEC 61727 grid code standard? -filetype:pdf",
         },
         {
             "code": "IEC 62116",
             "description": "Test procedure for anti-islanding protection measures",
             "mandatory": True,
             "weight": 0.10,
-            "pdf_query": f"IEC 62116 {inverter_brand} inverter anti-islanding test report filetype:pdf",
-            "url_query": f"Is {inverter_brand} inverter tested for IEC 62116 anti-islanding protection? -filetype:pdf",
+            "pdf_query": "{brand_name} inverter IEC 62116 certificate filetype:pdf",
+            "url_query": "Is {brand_name} inverter tested for IEC 62116 anti-islanding protection? -filetype:pdf",
         },
         {
             "code": "IEC 61000",
             "description": "Electromagnetic compatibility (EMC)",
             "mandatory": True,
             "weight": 0.10,
-            "pdf_query": f"IEC 61000 {inverter_brand} inverter EMC certification filetype:pdf",
-            "url_query": f"Does {inverter_brand} inverter comply with IEC 61000 EMC requirements? -filetype:pdf",
+            "pdf_query": "{brand_name} inverter IEC 61000 certificate filetype:pdf",
+            "url_query": "Does {brand_name} inverter comply with IEC 61000 EMC requirements? -filetype:pdf",
         },
     ]
 
@@ -895,24 +895,24 @@ def evaluate_inverter_compliance(inverter_brand: str) -> Dict[str, Any]:
 
 def main():
     # Test solar panel compliance
-    # brands = ["Trina Solar", "LONGi Solar", "JA Solar"]
-    # for brand_name in brands:
-    #     print(f"Evaluating Brand: {brand_name}")
-    #     compliance_result = evaluate_brand_compliance(brand_name)
-    #     print(json.dumps(compliance_result, indent=2))
-    #     print("\n" + "=" * 60 + "\n")
+    brands = ["JA Solar", "Trina Solar", "LONGi Solar"]
+    for brand_name in brands:
+        print(f"Evaluating Brand: {brand_name}")
+        compliance_result = evaluate_brand_compliance(brand_name)
+        print(json.dumps(compliance_result, indent=2))
+        print("\n" + "=" * 60 + "\n")
 
-    # print("\n" + "=" * 60 + "\n")
+    print("\n" + "=" * 60 + "\n")
 
     # Test inverter compliance
     inverter_brands = [
         "Sungrow",
-        # "Fronius",
-        # "SolarEdge",
+        "Fronius",
+        "SolarEdge",
         # "Victron Energy",
         # "Deye",
         # "Solis",
-        # "Huawei",
+        "Huawei",
     ]
     for inverter_brand in inverter_brands:
         print(f"Evaluating Inverter Brand: {inverter_brand}")
@@ -921,13 +921,13 @@ def main():
         print(json.dumps(inverter_result, indent=2))
         print("\n" + "=" * 60 + "\n")
 
-    # For "other (Specify Input)"
-    other_brand = input("Specify other inverter brand (or press Enter to skip): ").strip()
-    if other_brand:
-        print(f"Evaluating Inverter Brand: {other_brand}")
-        print("=" * 60)
-        inverter_result = evaluate_inverter_compliance(other_brand)
-        print(json.dumps(inverter_result, indent=2))
+    # # For "other (Specify Input)"
+    # other_brand = input("Specify other inverter brand (or press Enter to skip): ").strip()
+    # if other_brand:
+    #     print(f"Evaluating Inverter Brand: {other_brand}")
+    #     print("=" * 60)
+    #     inverter_result = evaluate_inverter_compliance(other_brand)
+    #     print(json.dumps(inverter_result, indent=2))
 
 
 if __name__ == "__main__":
