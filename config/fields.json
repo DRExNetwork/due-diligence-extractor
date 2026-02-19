@@ -221,7 +221,6 @@
       },
       "min_documents": 1
     },
-  
     "mounting_structures.structural_calculation.report_stamped_present": {
       "doc_category": "Mounting Structures",
       "doc_subcategory": "Structural Calculation Report",
@@ -269,7 +268,6 @@
       },
       "min_documents": 1
     },
-  
     "mounting_structures.mounting_layout.type_defined": {
       "doc_category": "Mounting Structures",
       "doc_subcategory": "Mounting Layout and Type",
@@ -311,8 +309,6 @@
       },
       "min_documents": 1
     },
-
-
     "electrical_design.unifilar_diagram.presence_of_inverter_meter_transformer_protection": {
       "doc_category": "Electrical Design",
       "doc_subcategory": "Unifilar Diagram",
@@ -526,6 +522,11 @@
             "type": "boolean",
             "required": true,
             "desc": "True if the doc is an electrical unifilar/SLD or unrelated electrical room/grounding sheet (e.g., 'Diagrama Unifilar', 'Single-Line', 'Tomacorrientes', 'SGDA', 'TMC', 'Mallas de puesta a tierra')."
+          },
+          "diagram_present": {
+            "type": "boolean",
+            "required": true,
+            "desc": "Derived: TRUE only if plan_view = true AND module_blocks_visible = true AND negative_hit_unifilar_or_electrical = false."
           }
         },
         "return_value": "diagram_present"
@@ -592,10 +593,27 @@
       "unit": "boolean",
       "extraction_contract": {
         "intermediate": {
-          "plan_view": {"type": "boolean", "required": true},
-          "module_blocks_visible": {"type": "boolean", "required": true},
-          "sheet_title": {"type": "string", "required": false},
-          "negative_hit_unifilar_or_electrical": {"type": "boolean", "required": true}
+          "plan_view": {
+            "type": "boolean",
+            "required": true
+          },
+          "module_blocks_visible": {
+            "type": "boolean",
+            "required": true
+          },
+          "sheet_title": {
+            "type": "string",
+            "required": false
+          },
+          "negative_hit_unifilar_or_electrical": {
+            "type": "boolean",
+            "required": true
+          },
+          "diagram_present": {
+            "type": "boolean",
+            "required": true,
+            "desc": "Derived: TRUE only if plan_view = true AND module_blocks_visible = true AND negative_hit_unifilar_or_electrical = false."
+          }
         },
         "return_value": "diagram_present"
       },
@@ -619,7 +637,11 @@
       "unit": "boolean",
       "extraction_contract": {
         "intermediate": {
-          "scada_architecture_present": { "type": "boolean", "required": true, "desc": "True if any SCADA/monitoring/network topology diagram is present (diagram/topología/arquitectura)" }
+          "scada_architecture_present": {
+            "type": "boolean",
+            "required": true,
+            "desc": "True if any SCADA/monitoring/network topology diagram is present (diagram/topología/arquitectura)"
+          }
         },
         "return_value": "scada_architecture_present"
       },
@@ -637,7 +659,10 @@
       "unit": "boolean",
       "extraction_contract": {
         "intermediate": {
-          "protocol_and_taglist_present": {"type": "boolean", "required": true}
+          "protocol_and_taglist_present": {
+            "type": "boolean",
+            "required": true
+          }
         },
         "return_value": "protocol_and_taglist_present"
       },
@@ -662,11 +687,31 @@
       "unit": "boolean",
       "extraction_contract": {
         "intermediate": {
-          "station_present":   { "type": "boolean", "required": true, "desc": "Explicit 'estación meteorológica'/'meteorological station' present." },
-          "pyranometer_present": { "type": "boolean", "required": true, "desc": "Explicit 'piranómetro'/'pyranometer' present." },
-          "soiling_sensor_present": { "type": "boolean", "required": true, "desc": "Explicit 'sensor de ensuciamiento'/'soiling sensor' present." },
-          "calibration_confirmed": { "type": "boolean", "required": true, "desc": "Explicit 'calibrado'/'certificado de calibración'/'calibration certificate' present." },
-          "met_sensors_ok":    { "type": "boolean", "required": true, "desc": "Derived: TRUE only if ALL four booleans above are TRUE." }
+          "station_present": {
+            "type": "boolean",
+            "required": true,
+            "desc": "Explicit 'estación meteorológica'/'meteorological station' present."
+          },
+          "pyranometer_present": {
+            "type": "boolean",
+            "required": true,
+            "desc": "Explicit 'piranómetro'/'pyranometer' present."
+          },
+          "soiling_sensor_present": {
+            "type": "boolean",
+            "required": true,
+            "desc": "Explicit 'sensor de ensuciamiento'/'soiling sensor' present."
+          },
+          "calibration_confirmed": {
+            "type": "boolean",
+            "required": true,
+            "desc": "Explicit 'calibrado'/'certificado de calibración'/'calibration certificate' present."
+          },
+          "met_sensors_ok": {
+            "type": "boolean",
+            "required": true,
+            "desc": "Derived: TRUE only if ALL four booleans above are TRUE."
+          }
         },
         "return_value": "met_sensors_ok"
       },

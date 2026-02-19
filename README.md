@@ -59,7 +59,7 @@ followed by a command, e.g.
 # env
 export OPENAI_API_KEY=sk-...
 export TAVILY_API_KEY=tvly-....
-export LLM_MODEL=gpt-4o-mini
+export LLM_MODEL=gpt-5-nano-2025-08-07
 
 python scripts/ai_doc_reader.py \
   --field-config ./config/fields.json \
