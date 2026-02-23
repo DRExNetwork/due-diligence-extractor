@@ -66,16 +66,20 @@ class DocumentType(str, Enum):
     GROUNDING_SYSTEM_DIAGRAM = "Grounding System"
 
     # ESG Documents
-    ESHS_ESMS_POLICIES = "ESHS / ESMS Policies"
+    ENVIRONMENTAL_AND_SOCIAL_MANAGEMENT_PLAN = "Environmental  and Social Management Plan (EMP)"
     QAQC_COMMISSIONING_PROCEDURES = "QA/QC & Commissioning Procedures"
-    HR_MANUAL_CODE_OF_CONDUCT = "HR Manual / Code of Conduct"
+    INDUSTRIAL_SAFETY_PLAN = "Industrial Safety Plan"
+    ENVIRONMENTAL_LICENCE_EIA = "Environmental Licence / EIA"
+    ENVIRONMENTAL_SOCIAL_MANAGEMENT_PLAN_ESMP = "Environmental & Social Management Plan (ESMP)"
+    EMERGENCY_RESPONSE_SECURITY_PLAN = "Emergency Response & Security Plan"
+    SITE_LEGAL_STATUS_SUMMARY = "Site Legal Status Summary"
+    LIENS_CERTIFICATE = "Liens Certificate"
+    NON_OVERLAP_WITH_PROTECTED_AREAS_CERTIFICATE = "Non-overlap with Protected Areas Certificate"
+    HR_POLICY_CODE_OF_CONDUCT = "HR Policy / Code of Conduct"
 
     # Permits Documents
     ELECTRICAL_UTILITY_FEASIBILITY_REPORT = "Electrical Utility Feasibility Report"
-    CONSTRUCTION_PERMIT = "Construction Permit"
-    ENVIRONMENTAL_PERMIT = "Environmental Permit"
     LAND_USE_PERMIT = "Land Use Permit"
-    INTERCONNECTION_AGREEMENT = "Interconnection Agreement"
 
     # Uncategorized
     UNCATEGORIZED = "Uncategorized Document"
@@ -110,15 +114,19 @@ DOCUMENT_TYPE_TO_TOP_LEVEL: dict[DocumentType, TopLevelCategory] = {
     DocumentType.CABLE_SIZING_CALCULATION: TopLevelCategory.TECHNICAL,
     DocumentType.GROUNDING_SYSTEM_DIAGRAM: TopLevelCategory.TECHNICAL,
     # ESG
-    DocumentType.ESHS_ESMS_POLICIES: TopLevelCategory.ESG,
+    DocumentType.ENVIRONMENTAL_AND_SOCIAL_MANAGEMENT_PLAN: TopLevelCategory.ESG,
     DocumentType.QAQC_COMMISSIONING_PROCEDURES: TopLevelCategory.ESG,
-    DocumentType.HR_MANUAL_CODE_OF_CONDUCT: TopLevelCategory.ESG,
+    DocumentType.INDUSTRIAL_SAFETY_PLAN: TopLevelCategory.ESG,
+    DocumentType.ENVIRONMENTAL_LICENCE_EIA: TopLevelCategory.ESG,
+    DocumentType.ENVIRONMENTAL_SOCIAL_MANAGEMENT_PLAN_ESMP: TopLevelCategory.ESG,
+    DocumentType.EMERGENCY_RESPONSE_SECURITY_PLAN: TopLevelCategory.ESG,
+    DocumentType.SITE_LEGAL_STATUS_SUMMARY: TopLevelCategory.ESG,
+    DocumentType.LIENS_CERTIFICATE: TopLevelCategory.ESG,
+    DocumentType.NON_OVERLAP_WITH_PROTECTED_AREAS_CERTIFICATE: TopLevelCategory.ESG,
+    DocumentType.HR_POLICY_CODE_OF_CONDUCT: TopLevelCategory.ESG,
+    DocumentType.LAND_USE_PERMIT: TopLevelCategory.ESG,
     # Permits
     DocumentType.ELECTRICAL_UTILITY_FEASIBILITY_REPORT: TopLevelCategory.PERMITS,
-    DocumentType.CONSTRUCTION_PERMIT: TopLevelCategory.PERMITS,
-    DocumentType.ENVIRONMENTAL_PERMIT: TopLevelCategory.PERMITS,
-    DocumentType.LAND_USE_PERMIT: TopLevelCategory.PERMITS,
-    DocumentType.INTERCONNECTION_AGREEMENT: TopLevelCategory.PERMITS,
 }
 
 DOCUMENT_TYPE_DESCRIPTIONS: dict[DocumentType, str] = {
@@ -145,15 +153,19 @@ DOCUMENT_TYPE_DESCRIPTIONS: dict[DocumentType, str] = {
     DocumentType.CABLE_SIZING_CALCULATION: "Cable sizing calculations and electrical specifications",
     DocumentType.GROUNDING_SYSTEM_DIAGRAM: "Grounding system design and single line diagram",
     # ESG
-    DocumentType.ESHS_ESMS_POLICIES: "Environmental, Social, Health and Safety (ESHS) or Environmental and Social Management System (ESMS) policies document covering IFC performance standards, OHS procedures, hazardous materials handling, labor procedures, waste management, and resource use controls",
+    DocumentType.ENVIRONMENTAL_AND_SOCIAL_MANAGEMENT_PLAN: "Environmental, Social, Health and Safety (ESHS) or Environmental and Social Management System (ESMS) policies document covering IFC performance standards, OHS procedures, hazardous materials handling, labor procedures, waste management, and resource use controls",
     DocumentType.QAQC_COMMISSIONING_PROCEDURES: "Quality Assurance/Quality Control and commissioning procedures document including visual inspection summary, electrical test results, and performance metrics",
-    DocumentType.HR_MANUAL_CODE_OF_CONDUCT: "Human Resources manual or Code of Conduct document containing IFC-aligned HR practices and company policies",
+    DocumentType.INDUSTRIAL_SAFETY_PLAN: "Human Resources manual or Code of Conduct document containing IFC-aligned HR practices and company policies",
+    DocumentType.ENVIRONMENTAL_LICENCE_EIA: "Environmental licence or EIA documentation including licence metadata and ESG risk-screening findings for habitats, biodiversity, communities, heritage, and consultation.",
+    DocumentType.ENVIRONMENTAL_SOCIAL_MANAGEMENT_PLAN_ESMP: "Environmental and Social Management Plan (ESMP) with validity period, scope, environmental/social aspects, monitoring indicators, and mitigation/adaptation measures.",
+    DocumentType.EMERGENCY_RESPONSE_SECURITY_PLAN: "Emergency response and security plan covering climate and security risks, crisis protocols, adaptation actions, and authority coordination.",
+    DocumentType.SITE_LEGAL_STATUS_SUMMARY: "Site legal status summary with land tenure, title/lease documentation, rights and claims, disputes, and expropriation risk context.",
+    DocumentType.LIENS_CERTIFICATE: "Liens certificate detailing existing mortgages/lien encumbrances and whether lender consent is required.",
+    DocumentType.NON_OVERLAP_WITH_PROTECTED_AREAS_CERTIFICATE: "Certificate confirming non-overlap with protected areas, including geographic reference and issuance/validity details.",
+    DocumentType.HR_POLICY_CODE_OF_CONDUCT: "HR policy and code of conduct covering human rights, labor standards, forced/child labor prohibition, non-discrimination, and supplier labor requirements.",
+    DocumentType.LAND_USE_PERMIT: "Land use permit or zoning approval for the project site",
     # Permits
     DocumentType.ELECTRICAL_UTILITY_FEASIBILITY_REPORT: "Utility feasibility report from the electrical distribution company containing capacity requested, feasibility status, available hosting capacity, maximum permitted annual generation, regulatory framework, issue date, and validity period",
-    DocumentType.CONSTRUCTION_PERMIT: "Construction permit or building permit authorizing the construction of the solar installation",
-    DocumentType.ENVIRONMENTAL_PERMIT: "Environmental impact assessment or environmental permit for the project",
-    DocumentType.LAND_USE_PERMIT: "Land use permit or zoning approval for the project site",
-    DocumentType.INTERCONNECTION_AGREEMENT: "Grid interconnection agreement with the utility company",
     # Uncategorized
     DocumentType.UNCATEGORIZED: "Documents that do not fit into any of the predefined categories",
 }
@@ -1000,7 +1012,7 @@ class OAMContractData(BaseModel):
 
 class ESHSESMSPoliciesData(BaseModel):
     """
-    Schema for ESHS / ESMS Policies (Section 3.1).
+    Schema for Environmental  and Social Management Plan (EMP) (Section 3.1).
 
     Environmental, Social, Health and Safety management policies
     aligned with IFC Performance Standards.
@@ -1173,7 +1185,7 @@ class QAQCCommissioningData(BaseModel):
 
 class HRManualCodeOfConductData(BaseModel):
     """
-    Schema for HR Manual / Code of Conduct (Section 3.3).
+    Schema for Industrial Safety Plan (Section 3.3).
 
     Human resources policies and code of conduct aligned with IFC standards.
     """
@@ -1230,6 +1242,321 @@ class HRManualCodeOfConductData(BaseModel):
     company_name: Optional[str] = Field(
         default=None,
         description="Company name as stated in the document",
+    )
+
+
+class EnvironmentalLicenceEIAData(BaseModel):
+    """Schema for Environmental Licence / EIA (Section 2.4)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    issuing_authority: Optional[str] = Field(default=None, description="Issuing authority")
+    license_number: Optional[str] = Field(default=None, description="License number")
+    issuing_date: Optional[str] = Field(
+        default=None,
+        description="Issuing date (YYYY-MM-DD)",
+    )
+    expiry_date: Optional[str] = Field(
+        default=None,
+        description="Expiry date (YYYY-MM-DD)",
+    )
+    sensitive_habitats_present: Optional[bool] = Field(
+        default=None,
+        description="Whether sensitive habitats are present (Yes/No)",
+    )
+    sensitive_habitats_description: Optional[str] = Field(
+        default=None,
+        description="Sensitive habitats description (2-4 lines)",
+    )
+    biodiversity_impacts_identified: Optional[bool] = Field(
+        default=None,
+        description="Whether biodiversity impacts are identified (Yes/No)",
+    )
+    biodiversity_impacts_summary: Optional[str] = Field(
+        default=None,
+        description="Biodiversity impacts summary (2-4 lines)",
+    )
+    ecosystem_services_impacted: Optional[bool] = Field(
+        default=None,
+        description="Whether ecosystem services are impacted (Yes/No)",
+    )
+    ecosystem_services_description: Optional[str] = Field(
+        default=None,
+        description="Ecosystem services description (2-4 lines)",
+    )
+    mitigation_measures_summary: Optional[str] = Field(
+        default=None,
+        description="Mitigation measures summary (2-4 lines)",
+    )
+    neighboring_populations_present: Optional[bool] = Field(
+        default=None,
+        description="Whether neighboring populations are present (Yes/No)",
+    )
+    neighboring_populations_description: Optional[str] = Field(
+        default=None,
+        description="Neighboring populations description (2-4 lines)",
+    )
+    critical_infrastructure_nearby: Optional[bool] = Field(
+        default=None,
+        description="Whether critical infrastructure is nearby (Yes/No)",
+    )
+    critical_infrastructure_description: Optional[str] = Field(
+        default=None,
+        description="Critical infrastructure description (2-4 lines)",
+    )
+    cultural_heritage_assets_present: Optional[bool] = Field(
+        default=None,
+        description="Whether cultural heritage assets are present (Yes/No)",
+    )
+    cultural_heritage_description: Optional[str] = Field(
+        default=None,
+        description="Cultural heritage description (2-4 lines)",
+    )
+    cultural_heritage_protection_measures: Optional[str] = Field(
+        default=None,
+        description="Cultural heritage protection measures (2-4 lines)",
+    )
+    public_consultation_required: Optional[bool] = Field(
+        default=None,
+        description="Whether public consultation is required (Yes/No)",
+    )
+    public_consultation_summary: Optional[str] = Field(
+        default=None,
+        description="Public consultation summary (2-4 lines)",
+    )
+
+
+class ESMPMonitoringIndicatorEntry(BaseModel):
+    """Monitoring indicator entry in ESMP documents."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    indicator: Optional[str] = Field(default=None, description="Monitoring indicator name")
+    unit: Optional[str] = Field(default=None, description="Indicator unit")
+    frequency: Optional[str] = Field(default=None, description="Monitoring frequency")
+
+
+class EnvironmentalSocialManagementPlanESMPData(BaseModel):
+    """Schema for Environmental & Social Management Plan (ESMP) (Section 2.5)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    valid_from: Optional[str] = Field(default=None, description="Validity start date (YYYY-MM-DD)")
+    valid_to: Optional[str] = Field(default=None, description="Validity end date (YYYY-MM-DD)")
+    scope_of_application: Optional[str] = Field(
+        default=None,
+        description="Scope of application/facilities covered",
+    )
+    environmental_aspects_covered: Optional[List[str]] = Field(
+        default=None,
+        description="Environmental aspects covered (emissions, waste, water, biodiversity)",
+    )
+    social_aspects_covered: Optional[List[str]] = Field(
+        default=None,
+        description="Social aspects covered (communities, workers)",
+    )
+    monitoring_indicators: Optional[List[ESMPMonitoringIndicatorEntry]] = Field(
+        default=None,
+        description="Monitoring indicators with unit and frequency",
+    )
+    biodiversity_management_measures: Optional[str] = Field(
+        default=None,
+        description="Biodiversity management measures",
+    )
+    community_impacts_management_measures: Optional[str] = Field(
+        default=None,
+        description="Community impacts management measures",
+    )
+    climate_adaptation_measures: Optional[str] = Field(
+        default=None,
+        description="Climate adaptation measures",
+    )
+
+
+class EmergencyResponseSecurityPlanData(BaseModel):
+    """Schema for Emergency Response & Security Plan (Section 2.6)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    last_update_date: Optional[str] = Field(
+        default=None,
+        description="Last update date (YYYY-MM-DD)",
+    )
+    risks_covered: Optional[List[str]] = Field(
+        default=None,
+        description="Risks covered (e.g., flood, fire, drought)",
+    )
+    climate_extreme_events_covered: Optional[bool] = Field(
+        default=None,
+        description="Whether climate extreme events are covered (Yes/No)",
+    )
+    climate_adaptation_actions: Optional[str] = Field(
+        default=None,
+        description="Climate adaptation actions",
+    )
+    security_risks_covered: Optional[bool] = Field(
+        default=None,
+        description="Whether security risks are covered (Yes/No)",
+    )
+    security_arrangements: Optional[str] = Field(
+        default=None,
+        description="Security arrangements",
+    )
+    access_to_basic_resources_during_crisis: Optional[str] = Field(
+        default=None,
+        description="Access to basic resources during crisis",
+    )
+    emergency_response_protocols: Optional[str] = Field(
+        default=None,
+        description="Emergency response protocols",
+    )
+    coordination_with_authorities: Optional[bool] = Field(
+        default=None,
+        description="Whether there is coordination with authorities (Yes/No)",
+    )
+
+
+class LandTitleDocumentEntry(BaseModel):
+    """Land title document entry for site legal status."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    document_type: Optional[str] = Field(default=None, description="Document type")
+    document_number: Optional[str] = Field(default=None, description="Document number")
+    document_date: Optional[str] = Field(default=None, description="Document date (YYYY-MM-DD)")
+
+
+class LeaseContractEntry(BaseModel):
+    """Lease contract entry for site legal status."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    lessor: Optional[str] = Field(default=None, description="Lessor name")
+    term: Optional[str] = Field(default=None, description="Lease term")
+    expiry: Optional[str] = Field(default=None, description="Lease expiry (YYYY-MM-DD)")
+
+
+class SiteLegalStatusSummaryData(BaseModel):
+    """Schema for Site Legal Status Summary (Section 2.7)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    land_tenure_status: Optional[str] = Field(
+        default=None,
+        description="Land tenure status (owned/leased/concession)",
+    )
+    number_of_plots: Optional[int] = Field(default=None, description="Number of plots")
+    land_title_documents_listed: Optional[List[LandTitleDocumentEntry]] = Field(
+        default=None,
+        description="Land title documents (type, number, date)",
+    )
+    lease_contracts_listed: Optional[List[LeaseContractEntry]] = Field(
+        default=None,
+        description="Lease contracts (lessor, term, expiry)",
+    )
+    collective_rights_indigenous_claims: Optional[bool] = Field(
+        default=None,
+        description="Whether collective rights or indigenous claims exist (Yes/No)",
+    )
+    collective_rights_description: Optional[str] = Field(
+        default=None,
+        description="Collective rights description",
+    )
+    known_property_disputes: Optional[bool] = Field(
+        default=None,
+        description="Whether known property disputes exist (Yes/No)",
+    )
+    property_disputes_summary: Optional[str] = Field(
+        default=None,
+        description="Property disputes summary",
+    )
+    expropriation_risk_identified: Optional[bool] = Field(
+        default=None,
+        description="Whether expropriation risk is identified (Yes/No)",
+    )
+    expropriation_risk_description: Optional[str] = Field(
+        default=None,
+        description="Expropriation risk description",
+    )
+
+
+class ExistingMortgageEntry(BaseModel):
+    """Existing mortgage entry for liens certificates."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    bank: Optional[str] = Field(default=None, description="Bank name")
+    amount: Optional[float] = Field(default=None, description="Mortgage amount")
+    date: Optional[str] = Field(default=None, description="Mortgage date (YYYY-MM-DD)")
+
+
+class LiensCertificateData(BaseModel):
+    """Schema for Liens Certificate (Section 2.8)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    existing_mortgages: Optional[List[ExistingMortgageEntry]] = Field(
+        default=None,
+        description="Existing mortgages (bank, amount, date)",
+    )
+    need_for_lender_consent: Optional[bool] = Field(
+        default=None,
+        description="Whether lender consent is needed (Yes/No)",
+    )
+
+
+class NonOverlapProtectedAreasCertificateData(BaseModel):
+    """Schema for Non-overlap with Protected Areas Certificate (Section 2.10)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    protected_area_presence: Optional[bool] = Field(
+        default=None,
+        description="Whether protected area presence is indicated (Yes/No)",
+    )
+    geographic_reference: Optional[str] = Field(
+        default=None,
+        description="Geographic reference (coordinates or location reference)",
+    )
+    issuing_authority: Optional[str] = Field(default=None, description="Issuing authority")
+    date_of_issuance: Optional[str] = Field(
+        default=None,
+        description="Date of issuance (YYYY-MM-DD)",
+    )
+    validity_date: Optional[str] = Field(
+        default=None,
+        description="Validity date (YYYY-MM-DD)",
+    )
+
+
+class HRPolicyCodeOfConductData(BaseModel):
+    """Schema for HR Policy / Code of Conduct (Section 2.11)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    human_rights_policy_exists: Optional[bool] = Field(
+        default=None,
+        description="Whether a human rights policy exists (Yes/No)",
+    )
+    labor_standards_policy_exists: Optional[bool] = Field(
+        default=None,
+        description="Whether a labor standards policy exists (Yes/No)",
+    )
+    prohibition_of_forced_labor: Optional[bool] = Field(
+        default=None,
+        description="Whether forced labor is explicitly prohibited (Yes/No)",
+    )
+    prohibition_of_child_labor: Optional[bool] = Field(
+        default=None,
+        description="Whether child labor is explicitly prohibited (Yes/No)",
+    )
+    non_discrimination_policy: Optional[bool] = Field(
+        default=None,
+        description="Whether a non-discrimination policy exists (Yes/No)",
+    )
+    supplier_labor_requirements: Optional[str] = Field(
+        default=None,
+        description="Supplier labor requirements (extracted text)",
     )
 
 
@@ -1331,92 +1658,6 @@ class ElectricalUtilityFeasibilityReportData(BaseModel):
         return self
 
 
-class ConstructionPermitData(BaseModel):
-    """
-    Schema for Construction Permit.
-
-    Building or construction permit authorizing project construction.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    permit_number: Optional[str] = Field(
-        default=None,
-        description="Permit number or reference ID",
-    )
-    issue_date: Optional[str] = Field(
-        default=None,
-        description="Date the permit was issued (YYYY-MM-DD)",
-    )
-    expiry_date: Optional[str] = Field(
-        default=None,
-        description="Permit expiry date (YYYY-MM-DD)",
-    )
-    issuing_authority: Optional[str] = Field(
-        default=None,
-        description="Authority that issued the permit (e.g., municipality name)",
-    )
-    project_name: Optional[str] = Field(
-        default=None,
-        description="Project name as stated in the permit",
-    )
-    project_address: Optional[str] = Field(
-        default=None,
-        description="Project location/address",
-    )
-    permitted_capacity_kw: Optional[float] = Field(
-        default=None,
-        description="Permitted installation capacity in kW",
-    )
-    permit_status: Optional[str] = Field(
-        default=None,
-        description="Current status of the permit (Active/Expired/Pending)",
-    )
-
-
-class EnvironmentalPermitData(BaseModel):
-    """
-    Schema for Environmental Permit.
-
-    Environmental impact assessment or environmental authorization.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    permit_number: Optional[str] = Field(
-        default=None,
-        description="Environmental permit number or reference",
-    )
-    issue_date: Optional[str] = Field(
-        default=None,
-        description="Date the permit was issued (YYYY-MM-DD)",
-    )
-    expiry_date: Optional[str] = Field(
-        default=None,
-        description="Permit expiry date (YYYY-MM-DD)",
-    )
-    issuing_authority: Optional[str] = Field(
-        default=None,
-        description="Environmental authority that issued the permit",
-    )
-    environmental_category: Optional[str] = Field(
-        default=None,
-        description="Environmental impact category (e.g., Category I, II, III)",
-    )
-    project_name: Optional[str] = Field(
-        default=None,
-        description="Project name as stated in the permit",
-    )
-    conditions_summary: Optional[str] = Field(
-        default=None,
-        description="Summary of key environmental conditions or requirements",
-    )
-    permit_status: Optional[str] = Field(
-        default=None,
-        description="Current status of the permit (Active/Expired/Pending)",
-    )
-
-
 class LandUsePermitData(BaseModel):
     """
     Schema for Land Use Permit.
@@ -1462,56 +1703,17 @@ class LandUsePermitData(BaseModel):
         default=None,
         description="Current status of the permit (Active/Expired/Pending)",
     )
-
-
-class InterconnectionAgreementData(BaseModel):
-    """
-    Schema for Interconnection Agreement.
-
-    Grid interconnection agreement with the utility company.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    agreement_number: Optional[str] = Field(
+    municipality_issuing_body: Optional[str] = Field(
         default=None,
-        description="Agreement number or contract reference",
+        description="Municipality issuing body",
     )
-    execution_date: Optional[str] = Field(
+    allowed_land_use_category: Optional[str] = Field(
         default=None,
-        description="Date the agreement was executed/signed (YYYY-MM-DD)",
+        description="Allowed land use category",
     )
-    effective_date: Optional[str] = Field(
+    validity_period: Optional[str] = Field(
         default=None,
-        description="Date the agreement becomes effective (YYYY-MM-DD)",
-    )
-    expiry_date: Optional[str] = Field(
-        default=None,
-        description="Agreement expiry date (YYYY-MM-DD)",
-    )
-    utility_company_name: Optional[str] = Field(
-        default=None,
-        description="Name of the utility company",
-    )
-    project_name: Optional[str] = Field(
-        default=None,
-        description="Project name as stated in the agreement",
-    )
-    interconnection_capacity_kw: Optional[float] = Field(
-        default=None,
-        description="Agreed interconnection capacity in kW",
-    )
-    voltage_level_kv: Optional[float] = Field(
-        default=None,
-        description="Interconnection voltage level in kV",
-    )
-    connection_point: Optional[str] = Field(
-        default=None,
-        description="Point of interconnection or substation",
-    )
-    agreement_status: Optional[str] = Field(
-        default=None,
-        description="Current status of the agreement (Active/Expired/Pending)",
+        description="Validity period (months/years)",
     )
 
 
@@ -1576,14 +1778,50 @@ class ESGData(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    eshs_esms_policies: Optional[ESHSESMSPoliciesData] = Field(
+    ENVIRONMENTAL_AND_SOCIAL_MANAGEMENT_PLAN: Optional[ESHSESMSPoliciesData] = Field(
         default=None, description="ESHS/ESMS policies data (Section 3.1)"
     )
     qaqc_commissioning: Optional[QAQCCommissioningData] = Field(
         default=None, description="QA/QC and commissioning data (Section 3.2)"
     )
-    hr_manual_code_of_conduct: Optional[HRManualCodeOfConductData] = Field(
+    INDUSTRIAL_SAFETY_PLAN: Optional[HRManualCodeOfConductData] = Field(
         default=None, description="HR manual and code of conduct data (Section 3.3)"
+    )
+    environmental_licence_eia: Optional[EnvironmentalLicenceEIAData] = Field(
+        default=None,
+        description="Environmental Licence / EIA data (Section 2.4)",
+    )
+    environmental_social_management_plan_esmp: Optional[
+        EnvironmentalSocialManagementPlanESMPData
+    ] = Field(
+        default=None,
+        description="Environmental & Social Management Plan (ESMP) data (Section 2.5)",
+    )
+    emergency_response_security_plan: Optional[EmergencyResponseSecurityPlanData] = Field(
+        default=None,
+        description="Emergency Response & Security Plan data (Section 2.6)",
+    )
+    site_legal_status_summary: Optional[SiteLegalStatusSummaryData] = Field(
+        default=None,
+        description="Site Legal Status Summary data (Section 2.7)",
+    )
+    liens_certificate: Optional[LiensCertificateData] = Field(
+        default=None,
+        description="Liens Certificate data (Section 2.8)",
+    )
+    non_overlap_with_protected_areas_certificate: Optional[
+        NonOverlapProtectedAreasCertificateData
+    ] = Field(
+        default=None,
+        description="Non-overlap with Protected Areas Certificate data (Section 2.10)",
+    )
+    hr_policy_code_of_conduct: Optional[HRPolicyCodeOfConductData] = Field(
+        default=None,
+        description="HR Policy / Code of Conduct data (Section 2.11)",
+    )
+    land_use_permit: Optional[LandUsePermitData] = Field(
+        default=None,
+        description="Land use permit data (Section 2.9)",
     )
 
 
@@ -1594,18 +1832,6 @@ class PermitsData(BaseModel):
 
     electrical_utility_feasibility: Optional[ElectricalUtilityFeasibilityReportData] = Field(
         default=None, description="Electrical utility feasibility report data (Section 2.1)"
-    )
-    construction_permit: Optional[ConstructionPermitData] = Field(
-        default=None, description="Construction permit data"
-    )
-    environmental_permit: Optional[EnvironmentalPermitData] = Field(
-        default=None, description="Environmental permit data"
-    )
-    land_use_permit: Optional[LandUsePermitData] = Field(
-        default=None, description="Land use permit data"
-    )
-    interconnection_agreement: Optional[InterconnectionAgreementData] = Field(
-        default=None, description="Interconnection agreement data"
     )
 
 
@@ -1654,15 +1880,19 @@ PYDANTIC_MODELS: dict[DocumentType, Type[BaseModel]] = {
     DocumentType.PROJECT_ACCEPTANCE_CERTIFICATES: ProjectAcceptanceCertificatesData,
     DocumentType.OAM_CONTRACTS: OAMContractData,
     # ESG
-    DocumentType.ESHS_ESMS_POLICIES: ESHSESMSPoliciesData,
+    DocumentType.ENVIRONMENTAL_AND_SOCIAL_MANAGEMENT_PLAN: ESHSESMSPoliciesData,
     DocumentType.QAQC_COMMISSIONING_PROCEDURES: QAQCCommissioningData,
-    DocumentType.HR_MANUAL_CODE_OF_CONDUCT: HRManualCodeOfConductData,
+    DocumentType.INDUSTRIAL_SAFETY_PLAN: HRManualCodeOfConductData,
+    DocumentType.ENVIRONMENTAL_LICENCE_EIA: EnvironmentalLicenceEIAData,
+    DocumentType.ENVIRONMENTAL_SOCIAL_MANAGEMENT_PLAN_ESMP: EnvironmentalSocialManagementPlanESMPData,
+    DocumentType.EMERGENCY_RESPONSE_SECURITY_PLAN: EmergencyResponseSecurityPlanData,
+    DocumentType.SITE_LEGAL_STATUS_SUMMARY: SiteLegalStatusSummaryData,
+    DocumentType.LIENS_CERTIFICATE: LiensCertificateData,
+    DocumentType.NON_OVERLAP_WITH_PROTECTED_AREAS_CERTIFICATE: NonOverlapProtectedAreasCertificateData,
+    DocumentType.HR_POLICY_CODE_OF_CONDUCT: HRPolicyCodeOfConductData,
+    DocumentType.LAND_USE_PERMIT: LandUsePermitData,
     # Permits
     DocumentType.ELECTRICAL_UTILITY_FEASIBILITY_REPORT: ElectricalUtilityFeasibilityReportData,
-    DocumentType.CONSTRUCTION_PERMIT: ConstructionPermitData,
-    DocumentType.ENVIRONMENTAL_PERMIT: EnvironmentalPermitData,
-    DocumentType.LAND_USE_PERMIT: LandUsePermitData,
-    DocumentType.INTERCONNECTION_AGREEMENT: InterconnectionAgreementData,
 }
 
 # Add Technical + Uncategorized schemas from landing_ai_poc_sdk2

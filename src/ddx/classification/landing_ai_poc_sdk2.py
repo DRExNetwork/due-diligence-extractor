@@ -33,11 +33,15 @@ from ddx.classification.categories import (
     ESHSESMSPoliciesData,
     QAQCCommissioningData,
     HRManualCodeOfConductData,
+    EnvironmentalLicenceEIAData,
+    EnvironmentalSocialManagementPlanESMPData,
+    EmergencyResponseSecurityPlanData,
+    SiteLegalStatusSummaryData,
+    LiensCertificateData,
+    NonOverlapProtectedAreasCertificateData,
+    HRPolicyCodeOfConductData,
     ElectricalUtilityFeasibilityReportData,
-    ConstructionPermitData,
-    EnvironmentalPermitData,
     LandUsePermitData,
-    InterconnectionAgreementData,
     # Company Experience
     ProjectAcceptanceCertificatesData,
     OAMContractData,
@@ -53,6 +57,7 @@ load_dotenv()
 LEGACY_API_MAX_PAGES = 50  # Legacy API supports up to 50 pages
 LEGACY_API_URL = "https://api.va.landing.ai/v1/tools/agentic-document-analysis"
 LEGACY_API_URL_EU = "https://api.va.eu-west-1.landing.ai/v1/tools/agentic-document-analysis"
+SUPPORTED_INPUT_EXTENSIONS = {".pdf", ".docx", ".png", ".jpeg", ".jpg"}
 
 
 # =============================================================================
@@ -604,15 +609,19 @@ PYDANTIC_MODELS: Dict[str, Type[BaseModel]] = {
     DocumentType.GROUNDING_SYSTEM_DIAGRAM.value: GroundingSystemSingleLineDiagramData,
     DocumentType.UNCATEGORIZED.value: UncategorizedDocumentData,
     # ESG (from categories.py)
-    DocumentType.ESHS_ESMS_POLICIES.value: ESHSESMSPoliciesData,
+    DocumentType.ENVIRONMENTAL_AND_SOCIAL_MANAGEMENT_PLAN.value: ESHSESMSPoliciesData,
     DocumentType.QAQC_COMMISSIONING_PROCEDURES.value: QAQCCommissioningData,
-    DocumentType.HR_MANUAL_CODE_OF_CONDUCT.value: HRManualCodeOfConductData,
+    DocumentType.INDUSTRIAL_SAFETY_PLAN.value: HRManualCodeOfConductData,
+    DocumentType.ENVIRONMENTAL_LICENCE_EIA.value: EnvironmentalLicenceEIAData,
+    DocumentType.ENVIRONMENTAL_SOCIAL_MANAGEMENT_PLAN_ESMP.value: EnvironmentalSocialManagementPlanESMPData,
+    DocumentType.EMERGENCY_RESPONSE_SECURITY_PLAN.value: EmergencyResponseSecurityPlanData,
+    DocumentType.SITE_LEGAL_STATUS_SUMMARY.value: SiteLegalStatusSummaryData,
+    DocumentType.LIENS_CERTIFICATE.value: LiensCertificateData,
+    DocumentType.NON_OVERLAP_WITH_PROTECTED_AREAS_CERTIFICATE.value: NonOverlapProtectedAreasCertificateData,
+    DocumentType.HR_POLICY_CODE_OF_CONDUCT.value: HRPolicyCodeOfConductData,
+    DocumentType.LAND_USE_PERMIT.value: LandUsePermitData,
     # Permits (from categories.py)
     DocumentType.ELECTRICAL_UTILITY_FEASIBILITY_REPORT.value: ElectricalUtilityFeasibilityReportData,
-    DocumentType.CONSTRUCTION_PERMIT.value: ConstructionPermitData,
-    DocumentType.ENVIRONMENTAL_PERMIT.value: EnvironmentalPermitData,
-    DocumentType.LAND_USE_PERMIT.value: LandUsePermitData,
-    DocumentType.INTERCONNECTION_AGREEMENT.value: InterconnectionAgreementData,
     # Company Experience (from categories.py)
     DocumentType.PROJECT_ACCEPTANCE_CERTIFICATES.value: ProjectAcceptanceCertificatesData,
     DocumentType.OAM_CONTRACTS.value: OAMContractData,
@@ -978,18 +987,29 @@ def get_category_output_dirs(
 
 
 def _iter_inputs(pdf: Optional[str], pdf_dir: Optional[str]) -> List[Path]:
-    """Iterate over input PDFs."""
+    """Iterate over input files (pdf, docx, png, jpeg)."""
     if pdf:
         p = Path(pdf).expanduser().resolve()
         if not p.exists():
             raise FileNotFoundError(f"Not found: {p}")
+        if p.suffix.lower() not in SUPPORTED_INPUT_EXTENSIONS:
+            raise ValueError(
+                "Unsupported file type. Supported extensions: "
+                f"{sorted(SUPPORTED_INPUT_EXTENSIONS)}"
+            )
         return [p]
 
     if pdf_dir:
         d = Path(pdf_dir).expanduser().resolve()
         if not d.exists():
             raise FileNotFoundError(f"Not found: {d}")
-        return sorted([p for p in d.rglob("*.pdf") if p.is_file()])
+        return sorted(
+            [
+                p
+                for p in d.rglob("*")
+                if p.is_file() and p.suffix.lower() in SUPPORTED_INPUT_EXTENSIONS
+            ]
+        )
 
     raise ValueError("Provide either --pdf or --pdf-dir")
 
@@ -1321,7 +1341,7 @@ def main() -> int:
         "--pdf-dir",
         type=str,
         default=None,
-        help="Directory to scan recursively for PDFs",
+        help="Directory to scan recursively for documents/images (.pdf, .docx, .png, .jpeg)",
     )
     ap.add_argument(
         "--out",
@@ -1414,7 +1434,7 @@ def main() -> int:
     print("=" * 60)
     print("Landing.ai Pipeline (Smart API Routing)")
     print("=" * 60)
-    print(f"PDFs to process: {len(pdfs)}")
+    print(f"Files to process: {len(pdfs)}")
     if top_level_category:
         print(f"Top-level category: {top_level_category.value}")
         available_types = get_document_types_for_category(top_level_category)
@@ -1494,12 +1514,12 @@ def main() -> int:
     print("\n" + "=" * 60)
     print("PROCESSING SUMMARY")
     print("=" * 60)
-    print(f"Total PDFs found: {len(pdfs)}")
+    print(f"Total files found: {len(pdfs)}")
     if top_level_category:
         print(f"Top-level category: {top_level_category.value}")
-    print(f"PDFs skipped (already processed): {skipped_count}")
-    print(f"PDFs processed successfully: {sum(category_counts.values())}")
-    print(f"PDFs with errors: {error_count}")
+    print(f"Files skipped (already processed): {skipped_count}")
+    print(f"Files processed successfully: {sum(category_counts.values())}")
+    print(f"Files with errors: {error_count}")
 
     print(f"\nAPI Usage Breakdown:")
     print(f"  Parse:")
