@@ -34,7 +34,6 @@ from ddx.classification.categories import (
     QAQCCommissioningData,
     HRManualCodeOfConductData,
     EnvironmentalLicenceEIAData,
-    EnvironmentalSocialManagementPlanESMPData,
     EmergencyResponseSecurityPlanData,
     SiteLegalStatusSummaryData,
     LiensCertificateData,
@@ -459,15 +458,6 @@ class ProjectDataMainEquipmentSheetsData(BaseModel):
         default=None, description="Anti-island test date if attached"
     )
 
-    # Mounting Structure
-    structure_material: Optional[str] = Field(
-        default=None,
-        description="Material of the mounting structure (Anodized Aluminum, Hot deep Galvanized, etc.)",
-    )
-    structure_warranty_years: Optional[int] = Field(
-        default=None, description="Structural warranty against corrosion in years"
-    )
-
 
 class ProjectVisitReportData(BaseModel):
     """Schema for Project Visit Report (Section 1.9) - Site Characteristics."""
@@ -525,6 +515,21 @@ class ProjectBasicEngineeringData(BaseModel):
     annual_load_energy_kwh: Optional[float] = Field(
         default=None, description="Annual load consumed energy in kWh"
     )
+    structure_type: Optional[str] = Field(
+        default=None,
+        description=(
+            "Type of mounting structure (anodized aluminum structure, coplanar, "
+            "land mounting, carports mounting on a metal roof, etc.)"
+        ),
+    )
+    structure_material: Optional[str] = Field(
+        default=None,
+        description="Material of the mounting structure (Anodized Aluminum, Hot deep Galvanized, etc.)",
+    )
+    structure_warranty_years: Optional[int] = Field(
+        default=None,
+        description="Structural warranty against corrosion in years",
+    )
     project_visitation_report: Optional[ProjectVisitReportData] = Field(
         default=None, description="Site visit information"
     )
@@ -552,7 +557,7 @@ class CableEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     connection_type: str = Field(
-        description="Connection type (DC solar connection, AC load connection)"
+        description="Type of circuit or connection. Allowed values: 'DC load connection' or 'AC load connection'"
     )
     sizing: str = Field(description="Conductor sizing (e.g., '35 mm²' or '10 AWG')")
     cable_type: str = Field(description="Cable type (e.g., 'XLPE type')")
@@ -567,7 +572,7 @@ class CableSizingCalculationReportData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     cable_entries: List[CableEntry] = Field(
-        description="Table of cable sizing for DC solar and AC load connections"
+        description="Table of cable sizing for DC load and AC load connections"
     )
 
 
@@ -613,7 +618,6 @@ PYDANTIC_MODELS: Dict[str, Type[BaseModel]] = {
     DocumentType.QAQC_COMMISSIONING_PROCEDURES.value: QAQCCommissioningData,
     DocumentType.INDUSTRIAL_SAFETY_PLAN.value: HRManualCodeOfConductData,
     DocumentType.ENVIRONMENTAL_LICENCE_EIA.value: EnvironmentalLicenceEIAData,
-    DocumentType.ENVIRONMENTAL_SOCIAL_MANAGEMENT_PLAN_ESMP.value: EnvironmentalSocialManagementPlanESMPData,
     DocumentType.EMERGENCY_RESPONSE_SECURITY_PLAN.value: EmergencyResponseSecurityPlanData,
     DocumentType.SITE_LEGAL_STATUS_SUMMARY.value: SiteLegalStatusSummaryData,
     DocumentType.LIENS_CERTIFICATE.value: LiensCertificateData,

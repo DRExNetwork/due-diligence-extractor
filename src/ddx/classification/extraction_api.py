@@ -1250,8 +1250,8 @@ async def _process_single_document(
     rate_limiter=None,
     save_markdown: bool = True,
     *,
-    cache_enabled: bool = False,
-    cache_bucket: Optional[str] = None,
+    cache_enabled: bool = True,
+    cache_bucket: Optional[str] = "drex-network",
     cache_prefix: str = _DEFAULT_CACHE_PREFIX,
     s3_client=None,
 ) -> DocumentResult:
@@ -1882,8 +1882,8 @@ async def extract_specific_fields_batch_async(
     extract_model: Optional[str] = None,
     max_concurrent: int = 5,
     rate_limit: float = 10.0,
-    markdown_cache: bool = False,
-    markdown_cache_bucket: Optional[str] = None,
+    markdown_cache: bool = True,
+    markdown_cache_bucket: Optional[str] = "drex-network",
     markdown_cache_prefix: str = _DEFAULT_CACHE_PREFIX,
 ) -> List[FieldExtractionResult]:
     """
@@ -1974,7 +1974,7 @@ async def extract_document_direct_async(
     extract_model: Optional[str] = None,
     existing_markdown: Optional[str] = None,
     rate_limit: float = 10.0,
-    markdown_cache: bool = False,
+    markdown_cache: bool = True,
     markdown_cache_bucket: Optional[str] = None,
     markdown_cache_prefix: str = _DEFAULT_CACHE_PREFIX,
 ) -> DocumentResult:
@@ -2108,8 +2108,8 @@ async def extract_documents_direct_batch_async(
     rate_limit: float = 10.0,
     enable_validation: bool = True,
     validation_model: str = "gpt-5-nano-2025-08-07",
-    markdown_cache: bool = False,
-    markdown_cache_bucket: Optional[str] = None,
+    markdown_cache: bool = True,
+    markdown_cache_bucket: Optional[str] = "drex-network",
     markdown_cache_prefix: str = _DEFAULT_CACHE_PREFIX,
 ) -> Tuple[List[DocumentResult], Optional[ValidatedDocumentResult]]:
     """
