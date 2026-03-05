@@ -67,7 +67,7 @@ class DocumentType(str, Enum):
     GROUNDING_SYSTEM_DIAGRAM = "Grounding System"
 
     # ESG Documents
-    ENVIRONMENTAL_AND_SOCIAL_MANAGEMENT_PLAN = "ENVIRONMENTAL_AND_SOCIAL_MANAGEMENT_PLAN"
+    ENVIRONMENTAL_AND_SOCIAL_MANAGEMENT_PLAN = "Environmental and Social Management Plan"
     QAQC_COMMISSIONING_PROCEDURES = "QA/QC & Commissioning Procedures"
     INDUSTRIAL_SAFETY_PLAN = "Industrial Safety Plan"
     ENVIRONMENTAL_LICENCE_EIA = "Environmental Licence / EIA"

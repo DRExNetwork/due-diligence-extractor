@@ -557,7 +557,7 @@ class CableEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     connection_type: str = Field(
-        description="The type of circuit or connection.We are only looking for DC load connection and AC load connection."
+        description="Type of circuit or connection. Allowed values: 'DC load connection' or 'AC load connection'"
     )
     sizing: str = Field(description="Conductor sizing (e.g., '35 mm²' or '10 AWG')")
     cable_type: str = Field(description="Cable type (e.g., 'XLPE type')")
