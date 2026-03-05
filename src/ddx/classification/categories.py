@@ -22,6 +22,7 @@ class TopLevelCategory(str, Enum):
 
     COMPANY_INFORMATION = "Company Information"
     COMPANY_FINANCIALS = "Company Financials"
+    FINANCIAL = "Financial"
     COMPANY_EXPERIENCE = "Company Experience"
     TECHNICAL = "Technical"
     ESG = "ESG"
@@ -66,11 +67,10 @@ class DocumentType(str, Enum):
     GROUNDING_SYSTEM_DIAGRAM = "Grounding System"
 
     # ESG Documents
-    ENVIRONMENTAL_AND_SOCIAL_MANAGEMENT_PLAN = "Environmental  and Social Management Plan (EMP)"
+    ENVIRONMENTAL_AND_SOCIAL_MANAGEMENT_PLAN = "ENVIRONMENTAL_AND_SOCIAL_MANAGEMENT_PLAN"
     QAQC_COMMISSIONING_PROCEDURES = "QA/QC & Commissioning Procedures"
     INDUSTRIAL_SAFETY_PLAN = "Industrial Safety Plan"
     ENVIRONMENTAL_LICENCE_EIA = "Environmental Licence / EIA"
-    ENVIRONMENTAL_SOCIAL_MANAGEMENT_PLAN_ESMP = "Environmental & Social Management Plan (ESMP)"
     EMERGENCY_RESPONSE_SECURITY_PLAN = "Emergency Response & Security Plan"
     SITE_LEGAL_STATUS_SUMMARY = "Site Legal Status Summary"
     LIENS_CERTIFICATE = "Liens Certificate"
@@ -100,7 +100,7 @@ DOCUMENT_TYPE_TO_TOP_LEVEL: dict[DocumentType, TopLevelCategory] = {
     DocumentType.INCOME_TAX_FILINGS: TopLevelCategory.COMPANY_FINANCIALS,
     DocumentType.CASH_FLOW_STATEMENTS: TopLevelCategory.COMPANY_FINANCIALS,
     DocumentType.TAX_COMPLIANCE_CERTIFICATE: TopLevelCategory.COMPANY_FINANCIALS,
-    DocumentType.ECONOMICAL_OFFER_BOQ: TopLevelCategory.COMPANY_FINANCIALS,
+    DocumentType.ECONOMICAL_OFFER_BOQ: TopLevelCategory.FINANCIAL,
     # Company Experience
     DocumentType.PROJECT_ACCEPTANCE_CERTIFICATES: TopLevelCategory.COMPANY_EXPERIENCE,
     DocumentType.OAM_CONTRACTS: TopLevelCategory.COMPANY_EXPERIENCE,
@@ -118,7 +118,6 @@ DOCUMENT_TYPE_TO_TOP_LEVEL: dict[DocumentType, TopLevelCategory] = {
     DocumentType.QAQC_COMMISSIONING_PROCEDURES: TopLevelCategory.ESG,
     DocumentType.INDUSTRIAL_SAFETY_PLAN: TopLevelCategory.ESG,
     DocumentType.ENVIRONMENTAL_LICENCE_EIA: TopLevelCategory.ESG,
-    DocumentType.ENVIRONMENTAL_SOCIAL_MANAGEMENT_PLAN_ESMP: TopLevelCategory.ESG,
     DocumentType.EMERGENCY_RESPONSE_SECURITY_PLAN: TopLevelCategory.ESG,
     DocumentType.SITE_LEGAL_STATUS_SUMMARY: TopLevelCategory.ESG,
     DocumentType.LIENS_CERTIFICATE: TopLevelCategory.ESG,
@@ -153,11 +152,10 @@ DOCUMENT_TYPE_DESCRIPTIONS: dict[DocumentType, str] = {
     DocumentType.CABLE_SIZING_CALCULATION: "Cable sizing calculations and electrical specifications",
     DocumentType.GROUNDING_SYSTEM_DIAGRAM: "Grounding system design and single line diagram",
     # ESG
-    DocumentType.ENVIRONMENTAL_AND_SOCIAL_MANAGEMENT_PLAN: "Environmental, Social, Health and Safety (ESHS) or Environmental and Social Management System (ESMS) policies document covering IFC performance standards, OHS procedures, hazardous materials handling, labor procedures, waste management, and resource use controls",
+    DocumentType.ENVIRONMENTAL_AND_SOCIAL_MANAGEMENT_PLAN: "Environmental and Social Management Plan (EMP/ESMP) or ESHS Policy. This document covers high-level corporate ESG commitments AND/OR field-level worker safety and health. It may include: validity periods, corporate monitoring indicators, mitigation strategies for biodiversity vs climate, AND/OR strict field procedures, PPE rules, worker rights, hazard handling, site waste disposal, and OHS principles. Often titled 'PGAS', 'EMP', 'ESMP', 'Health & Safety Plan', or 'ESHS Policy'.",
     DocumentType.QAQC_COMMISSIONING_PROCEDURES: "Quality Assurance/Quality Control and commissioning procedures document including visual inspection summary, electrical test results, and performance metrics",
     DocumentType.INDUSTRIAL_SAFETY_PLAN: "Human Resources manual or Code of Conduct document containing IFC-aligned HR practices and company policies",
     DocumentType.ENVIRONMENTAL_LICENCE_EIA: "Environmental licence or EIA documentation including licence metadata and ESG risk-screening findings for habitats, biodiversity, communities, heritage, and consultation.",
-    DocumentType.ENVIRONMENTAL_SOCIAL_MANAGEMENT_PLAN_ESMP: "Environmental and Social Management Plan (ESMP) with validity period, scope, environmental/social aspects, monitoring indicators, and mitigation/adaptation measures.",
     DocumentType.EMERGENCY_RESPONSE_SECURITY_PLAN: "Emergency response and security plan covering climate and security risks, crisis protocols, adaptation actions, and authority coordination.",
     DocumentType.SITE_LEGAL_STATUS_SUMMARY: "Site legal status summary with land tenure, title/lease documentation, rights and claims, disputes, and expropriation risk context.",
     DocumentType.LIENS_CERTIFICATE: "Liens certificate detailing existing mortgages/lien encumbrances and whether lender consent is required.",
@@ -204,12 +202,6 @@ class ShareholderEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     shareholder_name: str = Field(description="Full name of the shareholder")
-    ownership_percentage: Optional[float] = Field(
-        default=None, description="Ownership percentage (only shareholders with >10% stake)"
-    )
-    shareholder_type: Optional[str] = Field(
-        default=None, description="Type of shareholder (Individual/Corporate/Institutional)"
-    )
 
 
 class ShareholderStructure(BaseModel):
@@ -222,9 +214,6 @@ class ShareholderStructure(BaseModel):
     )
     shareholders: List[ShareholderEntry] = Field(
         description="List of shareholders with >10% ownership stake"
-    )
-    total_declared_percentage: Optional[float] = Field(
-        default=None, description="Sum of all declared ownership percentages"
     )
 
 
@@ -240,9 +229,6 @@ class LegalRepresentation(BaseModel):
         description="Date when the legal representative was appointed (format: YYYY-MM-DD if possible)"
     )
     years_of_validity: int = Field(description="Number of years the appointment is valid")
-    appointment_expiry_date: Optional[str] = Field(
-        default=None, description="Computed expiry date (appointment date + years of validity)"
-    )
 
 
 # =============================================================================
@@ -1023,9 +1009,9 @@ class ESHSESMSPoliciesData(BaseModel):
     # -------------------------------------------------------------------------
     # ESMS Aligned with IFC Performance Standards
     # -------------------------------------------------------------------------
-    esms_aligned_with_ifc_performance_standards: Optional[str] = Field(
+    esms_aligned_with_ifc_performance_standards: Optional[bool] = Field(
         default=None,
-        description="Summary of how the ESMS aligns with IFC Performance Standards (max 4 lines). Include Yes/No indication and brief description.",
+        description="Whether the ESMS aligns with IFC Performance Standards (Yes/No)",
     )
 
     # -------------------------------------------------------------------------
@@ -1082,6 +1068,36 @@ class ESHSESMSPoliciesData(BaseModel):
     company_name: Optional[str] = Field(
         default=None,
         description="Company name as stated in the document",
+    )
+    valid_from: Optional[str] = Field(default=None, description="Validity start date (YYYY-MM-DD)")
+    valid_to: Optional[str] = Field(default=None, description="Validity end date (YYYY-MM-DD)")
+    scope_of_application: Optional[str] = Field(
+        default=None,
+        description="Scope of application/facilities covered",
+    )
+    environmental_aspects_covered: Optional[List[str]] = Field(
+        default=None,
+        description="Environmental aspects covered (emissions, waste, water, biodiversity)",
+    )
+    social_aspects_covered: Optional[List[str]] = Field(
+        default=None,
+        description="Social aspects covered (communities, workers)",
+    )
+    monitoring_indicators: Optional[List[ESMPMonitoringIndicatorEntry]] = Field(
+        default=None,
+        description="Monitoring indicators with unit and frequency",
+    )
+    biodiversity_management_measures: Optional[str] = Field(
+        default=None,
+        description="Biodiversity management measures",
+    )
+    community_impacts_management_measures: Optional[str] = Field(
+        default=None,
+        description="Community impacts management measures",
+    )
+    climate_adaptation_measures: Optional[str] = Field(
+        default=None,
+        description="Climate adaptation measures",
     )
 
 
@@ -1334,43 +1350,6 @@ class ESMPMonitoringIndicatorEntry(BaseModel):
     indicator: Optional[str] = Field(default=None, description="Monitoring indicator name")
     unit: Optional[str] = Field(default=None, description="Indicator unit")
     frequency: Optional[str] = Field(default=None, description="Monitoring frequency")
-
-
-class EnvironmentalSocialManagementPlanESMPData(BaseModel):
-    """Schema for Environmental & Social Management Plan (ESMP) (Section 2.5)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    valid_from: Optional[str] = Field(default=None, description="Validity start date (YYYY-MM-DD)")
-    valid_to: Optional[str] = Field(default=None, description="Validity end date (YYYY-MM-DD)")
-    scope_of_application: Optional[str] = Field(
-        default=None,
-        description="Scope of application/facilities covered",
-    )
-    environmental_aspects_covered: Optional[List[str]] = Field(
-        default=None,
-        description="Environmental aspects covered (emissions, waste, water, biodiversity)",
-    )
-    social_aspects_covered: Optional[List[str]] = Field(
-        default=None,
-        description="Social aspects covered (communities, workers)",
-    )
-    monitoring_indicators: Optional[List[ESMPMonitoringIndicatorEntry]] = Field(
-        default=None,
-        description="Monitoring indicators with unit and frequency",
-    )
-    biodiversity_management_measures: Optional[str] = Field(
-        default=None,
-        description="Biodiversity management measures",
-    )
-    community_impacts_management_measures: Optional[str] = Field(
-        default=None,
-        description="Community impacts management measures",
-    )
-    climate_adaptation_measures: Optional[str] = Field(
-        default=None,
-        description="Climate adaptation measures",
-    )
 
 
 class EmergencyResponseSecurityPlanData(BaseModel):
@@ -1791,12 +1770,6 @@ class ESGData(BaseModel):
         default=None,
         description="Environmental Licence / EIA data (Section 2.4)",
     )
-    environmental_social_management_plan_esmp: Optional[
-        EnvironmentalSocialManagementPlanESMPData
-    ] = Field(
-        default=None,
-        description="Environmental & Social Management Plan (ESMP) data (Section 2.5)",
-    )
     emergency_response_security_plan: Optional[EmergencyResponseSecurityPlanData] = Field(
         default=None,
         description="Emergency Response & Security Plan data (Section 2.6)",
@@ -1846,7 +1819,7 @@ class ClassificationResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     top_level_category: TopLevelCategory = Field(
-        description="The top-level category (Company Information, Company Financials, Technical, etc.)"
+        description="The top-level category (Company Information, Company Financials, Financial, Technical, etc.)"
     )
     document_type: DocumentType = Field(
         description="The specific document type within the top-level category"
@@ -1884,7 +1857,6 @@ PYDANTIC_MODELS: dict[DocumentType, Type[BaseModel]] = {
     DocumentType.QAQC_COMMISSIONING_PROCEDURES: QAQCCommissioningData,
     DocumentType.INDUSTRIAL_SAFETY_PLAN: HRManualCodeOfConductData,
     DocumentType.ENVIRONMENTAL_LICENCE_EIA: EnvironmentalLicenceEIAData,
-    DocumentType.ENVIRONMENTAL_SOCIAL_MANAGEMENT_PLAN_ESMP: EnvironmentalSocialManagementPlanESMPData,
     DocumentType.EMERGENCY_RESPONSE_SECURITY_PLAN: EmergencyResponseSecurityPlanData,
     DocumentType.SITE_LEGAL_STATUS_SUMMARY: SiteLegalStatusSummaryData,
     DocumentType.LIENS_CERTIFICATE: LiensCertificateData,

@@ -8,6 +8,7 @@ and transforms results into API response models.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import json
 import logging
 import os
@@ -55,9 +56,16 @@ from ddx.api.models import (
     ValidationCorrectionResponse,
     FieldValidationResult,
     DocumentProcessingError,
+    SummaryGenerationRequest,
+    SummaryGenerationResponse,
+    SummarySectionOutput,
 )
 
 log = logging.getLogger("ddx.api.services")
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _truncate_for_log(value: Any, max_len: int = 3000) -> str:
@@ -71,6 +79,32 @@ def _truncate_for_log(value: Any, max_len: int = 3000) -> str:
         return serialized
 
     return f"{serialized[:max_len]}...(truncated)"
+
+
+def _persist_summary_trace(
+    request_payload: Dict[str, Any],
+    response_payload: Dict[str, Any],
+    *,
+    status: str,
+    error: Optional[str] = None,
+) -> None:
+    """Persist summary request/response to JSONL for debugging and auditability."""
+    trace_path = Path(os.getenv("SUMMARY_TRACE_PATH", "logs/summary-generation-trace.jsonl"))
+    if not trace_path.is_absolute():
+        trace_path = Path.cwd() / trace_path
+
+    trace_path.parent.mkdir(parents=True, exist_ok=True)
+
+    record: Dict[str, Any] = {
+        "timestamp": _utc_now_iso(),
+        "status": status,
+        "error": error,
+        "request": request_payload,
+        "response": response_payload,
+    }
+
+    with trace_path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 def _slug_document_type(value: str) -> str:
@@ -93,6 +127,303 @@ def _normalize_document_type(document_type: str) -> str:
         f"Unknown document type: '{document_type}'. "
         f"Valid types: {sorted(PYDANTIC_MODELS.keys())}"
     )
+
+
+# =============================================================================
+# Summary Generation Service
+# =============================================================================
+
+
+def _safe_str(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
+
+
+def _build_summary_system_prompt() -> str:
+    return (
+        "You are an investment analyst generating a structured project summary. "
+        "Use only values provided in the input payload. "
+        "Do not invent numbers, dates, names, percentages, capacities "
+        "Return valid JSON matching the requested schema."
+    )
+
+
+def _build_summary_user_payload(req: SummaryGenerationRequest) -> Dict[str, Any]:
+    return {
+        "schema_version": "summary_v1",
+        "project_id": req.project_id,
+        "project_name": req.project_name,
+        "language": req.language,
+        "template_name": req.template_name,
+        "sections": [section.model_dump() for section in req.sections],
+        "missing_fields": req.missing_fields,
+        "style_reference_markdown": req.style_reference_markdown,
+    }
+
+
+def _build_summary_response_schema() -> Dict[str, Any]:
+    return {
+        "name": "investment_summary_structured_response",
+        "schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "sections": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "id": {"type": "string"},
+                            "title": {"type": "string"},
+                            "order": {"type": "integer"},
+                            "narrative_intro": {"type": "string"},
+                            "narrative_closing": {"type": "string"},
+                            "table_rows": {
+                                "type": "array",
+                                "items": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                            },
+                            "kpis": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "label": {"type": "string"},
+                                        "value": {"type": "string"},
+                                        "available": {"type": "boolean"},
+                                    },
+                                    "required": ["label", "value", "available"],
+                                },
+                            },
+                            "bullets": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "source_fields": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                        },
+                        "required": [
+                            "id",
+                            "title",
+                            "order",
+                            "narrative_intro",
+                            "narrative_closing",
+                            "table_rows",
+                            "kpis",
+                            "bullets",
+                            "source_fields",
+                        ],
+                    },
+                },
+                "final_summary": {"type": "string"},
+            },
+            "required": ["sections", "final_summary"],
+        },
+        "strict": True,
+    }
+
+
+def _build_fallback_summary(
+    req: SummaryGenerationRequest, reason: str
+) -> SummaryGenerationResponse:
+    sections: List[SummarySectionOutput] = []
+    total_input_fields = 0
+    total_non_empty_values = 0
+
+    for section in req.sections:
+        table_rows: List[List[str]] = []
+        source_fields: List[str] = []
+
+        for variable in section.variables:
+            total_input_fields += 1
+            value_str = _safe_str(variable.value)
+            if value_str.strip():
+                total_non_empty_values += 1
+
+            table_rows.append([variable.label, value_str or "N/A"])
+            source_fields.append(variable.field_name)
+
+        sections.append(
+            SummarySectionOutput(
+                id=section.id,
+                title=section.title,
+                order=section.order,
+                narrative_intro=(
+                    f"This section summarizes {section.title.lower()} based on mapped project "
+                    "variables received from NestJS."
+                ),
+                narrative_closing="Further narrative enrichment can be generated by the configured LLM.",
+                table_rows=table_rows,
+                kpis=[],
+                bullets=[],
+                source_fields=source_fields,
+            )
+        )
+
+    completeness = 0.0
+    if total_input_fields > 0:
+        completeness = round((total_non_empty_values / total_input_fields) * 100, 2)
+
+    return SummaryGenerationResponse(
+        generated_at=_utc_now_iso(),
+        project_id=req.project_id,
+        project_name=req.project_name,
+        language=req.language,
+        model_version="fallback-rule-based",
+        sections=sorted(sections, key=lambda s: s.order),
+        final_summary=(
+            "Structured summary generated from mapped project variables. "
+            "Narrative content uses deterministic fallback mode."
+        ),
+        data_gaps=req.missing_fields,
+        quality_checks={
+            "required_sections_present": len(sections) == len(req.sections),
+            "input_fields_total": total_input_fields,
+            "input_fields_non_empty": total_non_empty_values,
+            "completeness_pct": completeness,
+            "fallback_reason": reason,
+        },
+        generation_mode="fallback",
+    )
+
+
+def _generate_summary_with_openai(req: SummaryGenerationRequest) -> SummaryGenerationResponse:
+    from openai import OpenAI
+
+    model_name = req.model or os.getenv("SUMMARY_MODEL") or os.getenv("LLM_MODEL")
+    model_name = model_name or "gpt-4.1-2025-04-14"
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is not configured")
+
+    client = OpenAI(api_key=api_key)
+
+    system_prompt = _build_summary_system_prompt()
+    payload = _build_summary_user_payload(req)
+
+    completion = client.chat.completions.create(
+        model=model_name,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": (
+                    "Generate structured investment summary JSON using this payload:\n"
+                    f"{json.dumps(payload, ensure_ascii=False)}"
+                ),
+            },
+        ],
+        response_format={
+            "type": "json_schema",
+            "json_schema": _build_summary_response_schema(),
+        },
+    )
+
+    content = completion.choices[0].message.content if completion.choices else None
+    if not content:
+        raise RuntimeError("LLM returned empty response for summary generation")
+
+    parsed = json.loads(content)
+
+    output_sections: List[SummarySectionOutput] = []
+    for section in parsed.get("sections", []):
+        output_sections.append(
+            SummarySectionOutput(
+                id=section.get("id", ""),
+                title=section.get("title", ""),
+                order=section.get("order", 0),
+                narrative_intro=section.get("narrative_intro", ""),
+                narrative_closing=section.get("narrative_closing"),
+                table_rows=section.get("table_rows", []),
+                kpis=section.get("kpis", []),
+                bullets=section.get("bullets", []),
+                source_fields=section.get("source_fields", []),
+            )
+        )
+
+    total_fields = sum(len(section.variables) for section in req.sections)
+    total_non_empty = sum(
+        1
+        for section in req.sections
+        for variable in section.variables
+        if _safe_str(variable.value).strip()
+    )
+    completeness = round((total_non_empty / total_fields) * 100, 2) if total_fields > 0 else 0.0
+
+    return SummaryGenerationResponse(
+        generated_at=_utc_now_iso(),
+        project_id=req.project_id,
+        project_name=req.project_name,
+        language=req.language,
+        model_version=getattr(completion, "model", model_name),
+        sections=sorted(output_sections, key=lambda s: s.order),
+        final_summary=parsed.get("final_summary", ""),
+        data_gaps=req.missing_fields,
+        quality_checks={
+            "required_sections_present": len(output_sections) > 0,
+            "input_fields_total": total_fields,
+            "input_fields_non_empty": total_non_empty,
+            "completeness_pct": completeness,
+        },
+        generation_mode="llm",
+    )
+
+
+async def generate_structured_summary(req: SummaryGenerationRequest) -> SummaryGenerationResponse:
+    """
+    Summary layer endpoint service.
+
+    Receives structured project variables from NestJS and returns a structured
+    summary JSON produced by the AI module.
+    """
+    request_payload = _build_summary_user_payload(req)
+
+    log.info(
+        "Summary generation request: project=%s, sections=%d, template=%s",
+        req.project_id,
+        len(req.sections),
+        req.template_name,
+    )
+    log.debug("Summary payload: %s", _truncate_for_log(request_payload))
+
+    try:
+        result = await asyncio.to_thread(_generate_summary_with_openai, req)
+        _persist_summary_trace(
+            request_payload,
+            result.model_dump(),
+            status="success",
+        )
+        log.info(
+            "Summary generation done: project=%s, mode=%s, sections=%d",
+            req.project_id,
+            result.generation_mode,
+            len(result.sections),
+        )
+        return result
+    except Exception as e:
+        log.warning(
+            "Summary generation falling back to deterministic mode for project=%s: %s",
+            req.project_id,
+            e,
+        )
+        fallback_result = _build_fallback_summary(req, str(e))
+        _persist_summary_trace(
+            request_payload,
+            fallback_result.model_dump(),
+            status="fallback",
+            error=str(e),
+        )
+        return fallback_result
 
 
 # =============================================================================
