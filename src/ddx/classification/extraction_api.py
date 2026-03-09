@@ -34,6 +34,7 @@ from ddx.classification.categories import (
     PYDANTIC_MODELS,
     DOCUMENT_TYPE_DESCRIPTIONS,
     DOCUMENT_TYPE_TO_TOP_LEVEL,
+    normalize_extracted_document,
 )
 from ddx.classification.landing_ai_poc_sdk import (
     # Schemas (for type hints)
@@ -52,6 +53,7 @@ from ddx.classification.landing_ai_poc_sdk import (
     # Functions
     build_classification_schema_for_category,
     get_document_types_for_category,
+    should_disable_cross_document_validation,
 )
 from dotenv import load_dotenv
 
@@ -184,15 +186,37 @@ def _build_chunk_lookup(parse_response: Any) -> Dict[str, dict]:
     chunks = getattr(parse_response, "chunks", None)
     if chunks is None and isinstance(parse_response, dict):
         chunks = parse_response.get("chunks", [])
-    if not chunks:
-        return {}
-
     lookup: Dict[str, dict] = {}
-    for chunk in chunks:
-        chunk_dict = chunk if isinstance(chunk, dict) else _chunk_to_dict(chunk)
-        cid = chunk_dict.get("chunk_id") or chunk_dict.get("id")
-        if cid:
-            lookup[cid] = chunk_dict
+
+    if chunks:
+        for chunk in chunks:
+            chunk_dict = chunk if isinstance(chunk, dict) else _chunk_to_dict(chunk)
+            cid = chunk_dict.get("chunk_id") or chunk_dict.get("id")
+            if cid:
+                lookup[cid] = chunk_dict
+
+    # Parse responses also include a top-level grounding map where keys can be
+    # table IDs / table-cell IDs (e.g., "0-b"). Include these keys so field
+    # references pointing to table cells can resolve to real locations.
+    grounding_map = getattr(parse_response, "grounding", None)
+    if grounding_map is None and isinstance(parse_response, dict):
+        grounding_map = parse_response.get("grounding", {})
+
+    if grounding_map is not None and not isinstance(grounding_map, dict):
+        if hasattr(grounding_map, "model_dump"):
+            grounding_map = grounding_map.model_dump()
+        elif hasattr(grounding_map, "dict"):
+            grounding_map = grounding_map.dict()
+
+    if isinstance(grounding_map, dict):
+        for ref_id, grounding_entry in grounding_map.items():
+            ref_key = str(ref_id)
+            if ref_key in lookup:
+                continue
+            pseudo_chunk = _grounding_entry_to_chunk(ref_key, grounding_entry)
+            if pseudo_chunk:
+                lookup[ref_key] = pseudo_chunk
+
     return lookup
 
 
@@ -212,6 +236,41 @@ def _chunk_to_dict(chunk: Any) -> dict:
         "chunk_type": getattr(chunk, "chunk_type", None) or getattr(chunk, "type", None),
         "type": getattr(chunk, "type", None),
     }
+
+
+def _grounding_entry_to_chunk(ref_id: str, grounding_entry: Any) -> Optional[dict]:
+    """Convert a top-level parse grounding entry into a chunk-like lookup item."""
+    if not isinstance(grounding_entry, dict):
+        if hasattr(grounding_entry, "model_dump"):
+            grounding_entry = grounding_entry.model_dump()
+        elif hasattr(grounding_entry, "dict"):
+            grounding_entry = grounding_entry.dict()
+
+    if not isinstance(grounding_entry, dict):
+        return None
+
+    box = grounding_entry.get("box")
+    page = grounding_entry.get("page", 0)
+    chunk_type = grounding_entry.get("type") or grounding_entry.get("chunk_type")
+
+    grounding_payload = {
+        "page": page,
+        "box": box if isinstance(box, dict) else {},
+    }
+
+    pseudo_chunk = {
+        "chunk_id": ref_id,
+        "id": ref_id,
+        "grounding": [grounding_payload],
+        "chunk_type": chunk_type,
+        "type": chunk_type,
+    }
+
+    position = grounding_entry.get("position")
+    if isinstance(position, dict):
+        pseudo_chunk["position"] = position
+
+    return pseudo_chunk
 
 
 def _resolve_references_to_locations(
@@ -679,6 +738,16 @@ def validate_batch_results(
     validator: Optional[ValidationLayer] = None
 
     for doc_type, type_results in results_by_type.items():
+        field_names = sorted(
+            {field_name for result in type_results for field_name in result.extracted_data.keys()}
+        )
+        if should_disable_cross_document_validation(doc_type, field_names):
+            print(
+                "  Skipping validation for "
+                f"{doc_type}: additive time-series fields must remain per source document"
+            )
+            continue
+
         if len(type_results) <= 1:
             # Single document, no conflicts possible
             validated_results[doc_type] = _build_validated_output(
@@ -1208,6 +1277,13 @@ async def _async_extract_fields(
         print(f"  ⚠️  Validation warning: {e}")
         extracted = extraction
 
+    extracted, normalized_metadata = normalize_extracted_document(
+        doc_type,
+        extracted,
+        raw.get("extraction_metadata"),
+    )
+    raw["extraction_metadata"] = normalized_metadata
+
     return extracted, raw
 
 
@@ -1352,6 +1428,10 @@ def _run_optional_validation(
         top_level_category=top_level_category,
         validation_model=validation_model,
     )
+    if not validated_results:
+        print("No eligible document types for validation in this batch.")
+        return None, False
+
     _print_validation_summary(validated_results)
     return validated_results, True
 
@@ -1813,14 +1893,18 @@ async def extract_specific_fields_async(
         partial_schema_cls = _create_partial_schema(full_schema_cls, fields)
         schema = pydantic_to_json_schema(partial_schema_cls)
 
-        print(f"  Extracting fields: {fields}")
         raw = await _async_extract(
             client, markdown_content, schema, model=extract_model, rate_limiter=rate_limiter_obj
         )
         extracted = raw.get("extraction", {})
+        extracted, ext_meta = normalize_extracted_document(
+            document_type,
+            extracted,
+            raw.get("extraction_metadata"),
+        )
+        raw["extraction_metadata"] = ext_meta
         _print_extracted_variables(file_name, extracted)
 
-        ext_meta = raw.get("extraction_metadata")
         grounding = _resolve_field_grounding(ext_meta, parse_response)
 
         return FieldExtractionResult(
@@ -2166,6 +2250,20 @@ async def extract_documents_direct_batch_async(
     if enable_validation and len(results_list) > 1:
         successful_results = [r for r in results_list if r.success]
         if len(successful_results) > 1:
+            field_names = sorted(
+                {
+                    field_name
+                    for result in successful_results
+                    for field_name in result.extracted_data.keys()
+                }
+            )
+            if should_disable_cross_document_validation(document_type, field_names):
+                print(
+                    "  Skipping validation for "
+                    f"{document_type}: additive time-series fields must remain per source document"
+                )
+                return results_list, None
+
             top_level = _get_top_level_for_document_type(document_type)
             if top_level:
                 validated_dict = validate_batch_results(

@@ -423,7 +423,7 @@ async def endpoint_targeted_completion(req: TargetedCompletionRequest):
         "2. **Extract** only the specific variable(s) requested\n"
         "3. **Validate** against expected values if provided\n"
         "4. Return precise confidence and evidence for each field\n"
-        "5. Accept `document_type` in canonical, snake_case, kebab-case, or case-insensitive form\n\n"
+        "5. Accept `document_type` in canonical, snake_case, or case-insensitive form\n\n"
         "Precision correction path — user leads, AI provides supporting evidence."
     ),
 )

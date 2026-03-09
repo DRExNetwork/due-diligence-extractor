@@ -7,9 +7,9 @@ Supports two-level categorization: Top-level category → Document type
 from __future__ import annotations
 
 from enum import Enum
-from typing import List, Optional, Type
+from typing import Any, Dict, List, Optional, Tuple, Type
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 # =============================================================================
@@ -202,6 +202,7 @@ class ShareholderEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     shareholder_name: str = Field(description="Full name of the shareholder")
+    ownership_percentage: float = Field(description="Ownership percentage of the shareholder")
 
 
 class ShareholderStructure(BaseModel):
@@ -629,12 +630,66 @@ class YearlyFinancialData(BaseModel):
         return self
 
 
+def _coerce_year(value: Any) -> Optional[int]:
+    """Convert extracted year-like values to integers when possible."""
+    if isinstance(value, bool):
+        return None
+
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _get_financial_ratio_year(entry: Any) -> Optional[int]:
+    """Read a year value from a financial ratio entry."""
+    if isinstance(entry, BaseModel):
+        return _coerce_year(getattr(entry, "year", None))
+
+    if isinstance(entry, dict):
+        return _coerce_year(entry.get("year"))
+
+    return None
+
+
+def _select_financial_statement_year_rows(
+    financial_ratios: List[Any], fiscal_year: Optional[int]
+) -> Tuple[List[int], Optional[int]]:
+    """Pick the row indexes that belong to the document fiscal year."""
+    if not financial_ratios:
+        return [], _coerce_year(fiscal_year)
+
+    target_year = _coerce_year(fiscal_year)
+    if target_year is None:
+        available_years = [
+            year
+            for year in (_get_financial_ratio_year(entry) for entry in financial_ratios)
+            if year is not None
+        ]
+        if available_years:
+            target_year = max(available_years)
+
+    if target_year is None:
+        return list(range(len(financial_ratios))), None
+
+    selected_indexes = [
+        index
+        for index, entry in enumerate(financial_ratios)
+        if _get_financial_ratio_year(entry) == target_year
+    ]
+    if not selected_indexes:
+        return list(range(len(financial_ratios))), target_year
+
+    return selected_indexes, target_year
+
+
 class FinancialStatementsData(BaseModel):
     """
     Schema for Financial Statements (Section 1.2).
 
-    Extracts financial data for minimum 3 years from audited or internal
-    financial statements. Includes both extracted values and computed ratios.
+    Extracts only the financial data for the document's fiscal year from audited
+    or internal financial statements. Comparative prior-year figures may appear
+    in the source document, but they must not be returned as separate entries.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -642,33 +697,114 @@ class FinancialStatementsData(BaseModel):
     # -------------------------------------------------------------------------
     # Metadata
     # -------------------------------------------------------------------------
-    company_name: Optional[str] = Field(
-        default=None, description="Company name as stated in the financial statements"
-    )
-    currency: Optional[str] = Field(
+    # company_name: Optional[str] = Field(
+    #     default=None, description="Company name as stated in the financial statements"
+    # )
+    # currency: Optional[str] = Field(
+    #     default=None,
+    #     description="Currency used in the statements (e.g., USD, EUR, or local currency code)",
+    # )
+    # is_audited: Optional[bool] = Field(
+    #     default=None,
+    #     description="Whether the financial statements are audited (True) or internal/unaudited (False)",
+    # )
+    # auditor_name: Optional[str] = Field(
+    #     default=None, description="Name of the auditing firm (if audited)"
+    # )
+
+    fiscal_year: Optional[int] = Field(
         default=None,
-        description="Currency used in the statements (e.g., USD, EUR, or local currency code)",
-    )
-    is_audited: Optional[bool] = Field(
-        default=None,
-        description="Whether the financial statements are audited (True) or internal/unaudited (False)",
-    )
-    auditor_name: Optional[str] = Field(
-        default=None, description="Name of the auditing firm (if audited)"
+        description=(
+            "Fiscal year of the document being extracted (for example, 2021 for a "
+            "2021 statement that also shows 2020 comparatives)."
+        ),
     )
 
     # -------------------------------------------------------------------------
-    # Yearly Financial Data (minimum 3 years)
+    # Yearly Financial Data
     # -------------------------------------------------------------------------
     financial_ratios: List[YearlyFinancialData] = Field(
-        description="Financial data and ratios for each fiscal year"
+        description=(
+            "Only the financial data for fiscal_year. Exclude comparative prior-year "
+            "rows or columns such as year-1."
+        )
     )
+
+    @model_validator(mode="after")
+    def normalize_to_document_fiscal_year(self) -> "FinancialStatementsData":
+        """Keep only the row that belongs to the current document fiscal year."""
+        selected_indexes, target_year = _select_financial_statement_year_rows(
+            self.financial_ratios,
+            self.fiscal_year,
+        )
+
+        if target_year is not None:
+            self.fiscal_year = target_year
+
+        if selected_indexes and len(selected_indexes) != len(self.financial_ratios):
+            self.financial_ratios = [self.financial_ratios[index] for index in selected_indexes]
+
+        return self.compute_all_ratios()
 
     def compute_all_ratios(self) -> "FinancialStatementsData":
         """Compute ratios for all years."""
         for year_data in self.financial_ratios:
             year_data.compute_ratios()
         return self
+
+
+def normalize_financial_statements_extraction(
+    extracted: Dict[str, Any],
+    extraction_metadata: Optional[Dict[str, Any]] = None,
+) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """Normalize extracted financial statements data to the document fiscal year."""
+    financial_ratios = extracted.get("financial_ratios")
+    if not isinstance(financial_ratios, list):
+        return extracted, extraction_metadata
+
+    selected_indexes, target_year = _select_financial_statement_year_rows(
+        financial_ratios,
+        extracted.get("fiscal_year"),
+    )
+
+    normalized_extracted = dict(extracted)
+    if target_year is not None:
+        normalized_extracted["fiscal_year"] = target_year
+
+    if selected_indexes and len(selected_indexes) != len(financial_ratios):
+        normalized_extracted["financial_ratios"] = [
+            financial_ratios[index] for index in selected_indexes
+        ]
+
+    normalized_metadata = extraction_metadata
+    if isinstance(extraction_metadata, dict):
+        normalized_metadata = dict(extraction_metadata)
+        metadata_rows = extraction_metadata.get("financial_ratios")
+        if isinstance(metadata_rows, list):
+            normalized_metadata["financial_ratios"] = [
+                metadata_rows[index] for index in selected_indexes if index < len(metadata_rows)
+            ]
+
+    return normalized_extracted, normalized_metadata
+
+
+def normalize_extracted_document(
+    document_type: DocumentType | str,
+    extracted: Dict[str, Any],
+    extraction_metadata: Optional[Dict[str, Any]] = None,
+) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """Apply document-type-specific normalization to extracted payloads."""
+    doc_type_value = (
+        document_type.value if isinstance(document_type, DocumentType) else document_type
+    )
+
+    print(f"Normalizing extracted data for document type: {doc_type_value}")
+    print(f"Initial extracted data keys: {extraction_metadata}")
+
+    if doc_type_value == DocumentType.FINANCIAL_STATEMENTS.value:
+        return normalize_financial_statements_extraction(extracted, extraction_metadata)
+
+    return extracted, extraction_metadata
 
 
 class AnnualTaxFiling(BaseModel):
