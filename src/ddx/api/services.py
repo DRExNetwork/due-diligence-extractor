@@ -44,6 +44,7 @@ from ddx.classification.extraction_api import (
     PYDANTIC_MODELS,
 )
 from ddx.classification.categories import TopLevelCategory
+from ddx.classification.landing_ai_poc_sdk import should_disable_cross_document_validation
 
 from ddx.api.models import (
     BulkIngestionRequest,
@@ -806,7 +807,15 @@ async def targeted_completion(req: TargetedCompletionRequest) -> TargetedComplet
         if resolved.is_empty:
             return _build_empty_targeted_response(req, top_level_str, doc_type)
 
-        if not req.enable_validation:
+        enable_validation = True
+        if should_disable_cross_document_validation(doc_type):
+            log.info(
+                "Targeted completion bypassing validation for doc_type='%s' because it "
+                "contains additive repeated variables",
+                doc_type,
+            )
+            enable_validation = False
+        elif not req.enable_validation:
             log.info(
                 "Targeted completion received enable_validation=False; enforcing validation for Type 2"
             )
@@ -819,7 +828,7 @@ async def targeted_completion(req: TargetedCompletionRequest) -> TargetedComplet
             extract_model=req.config.extract_model,
             max_concurrent=req.max_concurrent,
             rate_limit=req.config.rate_limit,
-            enable_validation=True,
+            enable_validation=enable_validation,
             validation_model=req.validation_model,
         )
 

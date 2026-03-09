@@ -44,6 +44,7 @@ from ddx.classification.categories import (
     # Company Experience
     ProjectAcceptanceCertificatesData,
     OAMContractData,
+    normalize_extracted_document,
 )
 
 from dotenv import load_dotenv
@@ -874,6 +875,13 @@ def extract_fields(
         "extraction_metadata": getattr(response, "extraction_metadata", None),
         "metadata": getattr(response, "metadata", None),
     }
+
+    extracted, normalized_metadata = normalize_extracted_document(
+        doc_type,
+        extracted,
+        raw.get("extraction_metadata"),
+    )
+    raw["extraction_metadata"] = normalized_metadata
 
     extracted_log = json.dumps(extracted, ensure_ascii=False, default=str)
     if len(extracted_log) > 3000:
