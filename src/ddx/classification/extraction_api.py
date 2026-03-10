@@ -91,6 +91,54 @@ def _build_category_document_types() -> Dict[TopLevelCategory, List[str]]:
 CATEGORY_DOCUMENT_TYPES: Dict[TopLevelCategory, List[str]] = _build_category_document_types()
 
 
+_EQUIPMENT_RESEARCH_ONLY_FIELDS = {
+    "module_bloomberg",
+    "module_certificate_evidence",
+    "module_factory_test_date",
+    "module_test_evidence",
+    "inverter_bloomberg",
+    "inverter_certificate_evidence",
+    "inverter_anti_island_test_date",
+    "inverter_test_evidence",
+}
+
+
+def _is_equipment_sheets_document_type(document_type: str) -> bool:
+    return (
+        document_type or ""
+    ).strip().lower() == DocumentType.PROJECT_DATA_EQUIPMENT_SHEETS.value.strip().lower()
+
+
+def _remove_schema_fields(schema: Any, field_names: set[str]) -> Any:
+    """Remove fields from a JSON schema represented as dict or JSON string."""
+    if isinstance(schema, str):
+        try:
+            parsed = json.loads(schema)
+        except Exception:
+            return schema
+
+        filtered = _remove_schema_fields(parsed, field_names)
+
+        try:
+            return json.dumps(filtered)
+        except Exception:
+            return schema
+
+    if not isinstance(schema, dict):
+        return schema
+
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        for field_name in field_names:
+            properties.pop(field_name, None)
+
+    required = schema.get("required")
+    if isinstance(required, list):
+        schema["required"] = [name for name in required if name not in field_names]
+
+    return schema
+
+
 def _print_extracted_variables(context: str, extracted: Any, max_len: int = 3000) -> None:
     """Print extracted variables in a compact, bounded format."""
     try:
@@ -1258,6 +1306,12 @@ async def _async_extract_fields(
 
     # Convert Pydantic model to JSON schema
     schema = pydantic_to_json_schema(model_cls)
+
+    # Equipment research-only fields are populated by the research module.
+    # Excluding them here avoids SDK extraction returning partial/null values
+    # that can conflict with enriched research values downstream.
+    if _is_equipment_sheets_document_type(doc_type):
+        schema = _remove_schema_fields(schema, _EQUIPMENT_RESEARCH_ONLY_FIELDS)
 
     raw = await _async_extract(
         client, markdown_content, schema, model=model, rate_limiter=rate_limiter

@@ -60,6 +60,56 @@ LEGACY_API_URL_EU = "https://api.va.eu-west-1.landing.ai/v1/tools/agentic-docume
 SUPPORTED_INPUT_EXTENSIONS = {".pdf", ".docx", ".png", ".jpeg", ".jpg"}
 
 
+_EQUIPMENT_RESEARCH_ONLY_FIELDS = {
+    "module_bloomberg",
+    "module_certifications",
+    "module_certificate_evidence",
+    "module_factory_test_date",
+    "module_test_evidence",
+    "inverter_bloomberg",
+    "inverter_certifications",
+    "inverter_certificate_evidence",
+    "inverter_anti_island_test_date",
+    "inverter_test_evidence",
+}
+
+
+def _is_equipment_sheets_document_type(document_type: str) -> bool:
+    return (
+        document_type or ""
+    ).strip().lower() == DocumentType.PROJECT_DATA_EQUIPMENT_SHEETS.value.strip().lower()
+
+
+def _remove_schema_fields(schema: Any, field_names: set[str]) -> Any:
+    """Remove fields from a JSON schema represented as dict or JSON string."""
+    if isinstance(schema, str):
+        try:
+            parsed = json.loads(schema)
+        except Exception:
+            return schema
+
+        filtered = _remove_schema_fields(parsed, field_names)
+
+        try:
+            return json.dumps(filtered)
+        except Exception:
+            return schema
+
+    if not isinstance(schema, dict):
+        return schema
+
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        for field_name in field_names:
+            properties.pop(field_name, None)
+
+    required = schema.get("required")
+    if isinstance(required, list):
+        schema["required"] = [name for name in required if name not in field_names]
+
+    return schema
+
+
 # =============================================================================
 # PDF Page Count Utility
 # =============================================================================
@@ -397,6 +447,61 @@ class ProjectSimulationReportData(BaseModel):
     )
 
 
+class BloombergResearchEvidence(BaseModel):
+    """Web-research evidence from the latest Bloomberg list for the current year."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rating: Optional[str] = Field(
+        default=None,
+        description="Qualification/rating found in latest Bloomberg evidence for current year (for example AAA, AA, A)",
+    )
+    source: Optional[str] = Field(
+        default=None,
+        description="Source URL supporting the Bloomberg qualification/rating",
+    )
+
+
+class CertificateResearchEvidence(BaseModel):
+    """Web-research evidence for certificate name, source, and validity date."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    standard_code: str = Field(
+        description="Certificate standard code being researched (for example IEC 61215, IEC 62109)",
+    )
+    certificate_name: Optional[str] = Field(
+        default=None,
+        description="Certificate/report name found for the standard",
+    )
+    source: Optional[str] = Field(
+        default=None,
+        description="Source URL for the certificate evidence",
+    )
+    validity_date: Optional[str] = Field(
+        default=None,
+        description="Extracted certificate validity date in YYYY-MM-DD (null if not found)",
+    )
+
+
+class TestResearchEvidence(BaseModel):
+    """Web-research evidence for module/inverter test reports."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    test_name: str = Field(
+        description="Target test name from research query (for example Fabric report test or Anti-islanding test)",
+    )
+    source: Optional[str] = Field(
+        default=None,
+        description="Source URL for the test report evidence",
+    )
+    test_date: Optional[str] = Field(
+        default=None,
+        description="Extracted test date in YYYY-MM-DD (null if not found)",
+    )
+
+
 class ProjectDataMainEquipmentSheetsData(BaseModel):
     """Schema for Project Data Main Equipment Sheets (Section 1.7)."""
 
@@ -424,12 +529,17 @@ class ProjectDataMainEquipmentSheetsData(BaseModel):
         default=None,
         description="Module degradation rate for year 2 onwards in % - derived from linear degradation curve in datasheet",
     )
-    module_certifications: Optional[List[str]] = Field(
+    module_bloomberg: Optional[BloombergResearchEvidence] = Field(
         default=None,
-        description="Certifications (IEC 61215, IEC 61730, PID test, IEC 62716, IEC 61701)",
+        description="Latest/current-year Bloomberg research evidence for module_brand",
     )
-    module_factory_test_date: Optional[str] = Field(
-        default=None, description="Factory report test date if attached"
+    module_certificate_evidence: Optional[List[CertificateResearchEvidence]] = Field(
+        default=None,
+        description="Detailed module certificate evidence from latest research for IEC 61215, IEC 61730, IEC TS 62804 (PID), IEC 62716, and IEC 61701",
+    )
+    module_test_evidence: Optional[List[TestResearchEvidence]] = Field(
+        default=None,
+        description="Detailed module test evidence from latest research (Fabric report test)",
     )
 
     # Inverter
@@ -452,11 +562,17 @@ class ProjectDataMainEquipmentSheetsData(BaseModel):
     inverter_technical_warranty_years: Optional[int] = Field(
         default=None, description="Inverter warranty in years"
     )
-    inverter_certifications: Optional[List[str]] = Field(
-        default=None, description="Inverter certifications"
+    inverter_bloomberg: Optional[BloombergResearchEvidence] = Field(
+        default=None,
+        description="Latest/current-year Bloomberg research evidence for inverter_brand",
     )
-    inverter_anti_island_test_date: Optional[str] = Field(
-        default=None, description="Anti-island test date if attached"
+    inverter_certificate_evidence: Optional[List[CertificateResearchEvidence]] = Field(
+        default=None,
+        description="Detailed inverter certificate evidence from latest research for IEC 62109, IEC 61727, and IEC 61000",
+    )
+    inverter_test_evidence: Optional[List[TestResearchEvidence]] = Field(
+        default=None,
+        description="Detailed inverter test evidence from latest research (Anti-islanding test)",
     )
 
 
@@ -844,6 +960,12 @@ def extract_fields(
 
     # Convert Pydantic model to JSON schema
     schema = pydantic_to_json_schema(model_cls)
+
+    # Equipment research-only fields are filled by research enrichment.
+    # Excluding them from SDK extraction avoids partial/null extraction values
+    # overriding enriched values later in the pipeline.
+    if _is_equipment_sheets_document_type(doc_type):
+        schema = _remove_schema_fields(schema, _EQUIPMENT_RESEARCH_ONLY_FIELDS)
 
     print(f"  [SDK] Extracting fields with model: {extract_model}")
     response = client.extract(
