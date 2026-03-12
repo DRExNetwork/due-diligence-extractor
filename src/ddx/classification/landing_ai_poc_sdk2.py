@@ -647,16 +647,39 @@ class ProjectBasicEngineeringData(BaseModel):
         default=None,
         description="Structural warranty against corrosion in years",
     )
-    project_visitation_report: Optional[ProjectVisitReportData] = Field(
-        default=None, description="Site visit information"
+    # project_visitation_report: Optional[ProjectVisitReportData] = Field(
+    #     default=None, description="Site visit information"
+    # )
+
+    site_description: str = Field(description="Site description")
+    installation_area_m2: float = Field(description="Area for project installation in m²")
+    installation_location: str = Field(
+        description="Location of area available for installation (Rooftop, Land, Floating, etc.)"
     )
-    project_layout: Optional[ProjectLayoutData] = Field(
-        default=None,
-        description="Layout and sizing information",
+    # project_layout: Optional[ProjectLayoutData] = Field(
+    #     default=None,
+    #     description="Layout and sizing information",
+    # )
+
+    nominal_capacity_kw: float = Field(description="Nominal capacity in kW")
+    peak_capacity_kwp: float = Field(description="Peak capacity in kWp")
+    solar_modules_quantity: int = Field(description="Solar modules quantity")
+    solar_module_brand: str = Field(description="Solar module brand (e.g., JA Solar)")
+    solar_module_model: str = Field(description="Solar module model (e.g., JAM72S30-540/MR)")
+    inverter_brand: Optional[str] = Field(default=None, description="Inverter brand")
+    inverter_model: Optional[str] = Field(default=None, description="Inverter model")
+    inverters_quantity: int = Field(description="Inverters quantity")
+    strings_per_inverter: Optional[int] = Field(
+        default=None, description="Strings per inverter quantity"
     )
-    grouding_system: Optional[GroundingSystemSingleLineDiagramData] = Field(
-        default=None,
-        description="Grounding system information",
+    module_orientation: Optional[str] = Field(default=None, description="Solar module orientation")
+    # grouding_system: Optional[GroundingSystemSingleLineDiagramData] = Field(
+    #     default=None,
+    #     description="Grounding system information",
+    # )
+    system_type: str = Field(description="Type of grounding system")
+    resistance_value_ohm: float = Field(
+        description="Ground resistance value in Ohms (Ω). Extract the exact decimal value, do not round."
     )
 
 
