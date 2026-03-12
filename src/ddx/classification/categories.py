@@ -133,7 +133,7 @@ DOCUMENT_TYPE_DESCRIPTIONS: dict[DocumentType, str] = {
     DocumentType.CERTIFICATE_OF_LEGAL_EXISTENCE: "Official certificate containing company legal name, tax ID (RUC), commercial activity, and incorporation date",
     DocumentType.SHAREHOLDERS_DECLARATION: "Declaration document listing shareholders/owners with their ownership percentages (>10% stake)",
     DocumentType.LEGAL_REPRESENTATIVE_APPOINTMENT: "Official appointment document for the company's legal representative including validity period",
-    DocumentType.ENERGY_CONSUMPTION_BILLS: "Energy bills or energy reports from the electricity utility provider (e.g., CNEL) showing monthly energy consumption, demand, and tariffs for 12 months. Used to create consumption profile with monthly and annual statistics.",
+    DocumentType.ENERGY_CONSUMPTION_BILLS: "Energy consumption bills or energy reports from the electricity utility provider",
     # Company Financials
     DocumentType.FINANCIAL_STATEMENTS: "Audited or internal financial statements with balance sheet and income statement data including revenue, net income, EBIT, assets, liabilities, and equity (minimum 3 years)",
     DocumentType.INCOME_TAX_FILINGS: "SRI/Tax authority filings showing income tax paid per fiscal year (minimum 3 years)",
@@ -237,157 +237,209 @@ class LegalRepresentation(BaseModel):
 # =============================================================================
 
 
-class MonthlyEnergyConsumptionEntry(BaseModel):
-    """
-    Monthly energy consumption data entry.
-
-    Represents one month of energy billing data from utility provider.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    # -------------------------------------------------------------------------
-    # Month Identification
-    # -------------------------------------------------------------------------
-    month: str = Field(description="Month name (January, February, etc.) or month number (1-12)")
-    year: Optional[int] = Field(
-        default=None,
-        description="Year of the billing period (e.g., 2024)",
-    )
-    billing_period_start: Optional[str] = Field(
-        default=None,
-        description="Start date of the billing period (YYYY-MM-DD)",
-    )
-    billing_period_end: Optional[str] = Field(
-        default=None,
-        description="End date of the billing period (YYYY-MM-DD)",
-    )
-
-    # -------------------------------------------------------------------------
-    # Energy Consumption (Extracted)
-    # -------------------------------------------------------------------------
-    energy_consumption_kwh: float = Field(
-        description="Monthly energy consumption in kWh, MWh, or GWh (convert to kWh)"
-    )
-
-    # -------------------------------------------------------------------------
-    # Demand Values (Extracted)
-    # -------------------------------------------------------------------------
-    average_demand_kw: Optional[float] = Field(
-        default=None,
-        description="Monthly average demand in kW or MW (convert to kW)",
-    )
-    peak_demand_kw: Optional[float] = Field(
-        default=None,
-        description="Monthly peak demand in kW or MW (convert to kW)",
-    )
-
-    # -------------------------------------------------------------------------
-    # Tariff Information (Extracted)
-    # -------------------------------------------------------------------------
-    energy_tariff_usd_kwh: Optional[float] = Field(
-        default=None,
-        description="Energy tariff in $/kWh for the month",
-    )
-    total_bill_amount_usd: Optional[float] = Field(
-        default=None,
-        description="Total bill amount in USD for the month",
-    )
-
-
 class EnergyConsumptionBillsData(BaseModel):
     """
-    Schema for Energy Consumption Bills / Energy Reports (Section 2.1).
+    Single monthly electricity bill extraction entry.
 
-    Energy bills from the electricity utility provider (e.g., CNEL) showing
-    monthly energy consumption, demand, and tariffs for 12 months.
-    Output structure: Consumption Profile (Table + Single values + Graph)
+    One entry corresponds to one uploaded monthly bill document.
+    Contains the full bill-level account/provider metadata and monthly consumption
+    metrics for that billing period.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     # -------------------------------------------------------------------------
-    # Utility Provider Information (Extracted)
+    # Utility Provider & Account Information (monthly bill context)
     # -------------------------------------------------------------------------
     electricity_utility_provider: Optional[str] = Field(
         default=None,
-        description="Name of the electricity utility provider (e.g., CNEL, EEQ)",
+        description=(
+            "Name of the electricity utility provider. "
+            "Primary source: visual logo at the top-left corner of the bill (e.g., CNEL EP, EEQ). "
+            "Fallback: first header line with the full legal provider name "
+            "(e.g., 'Empresa Electrica Publica Estrategica Corporacion Nacional de Electricidad CNEL EP'). "
+            "Return a normalized short name (e.g., 'CNEL EP', 'EEQ')."
+        ),
+    )
+    razon_social: Optional[str] = Field(
+        default=None,
+        description=(
+            "Legal business name of the account holder / offtaker as printed on the bill (Razon Social). "
+            "Used for verification only."
+        ),
+    )
+    ruc: Optional[str] = Field(
+        default=None,
+        description=(
+            "RUC (Ecuador tax ID) of the account holder as printed on the bill. "
+            "Used for verification only."
+        ),
+    )
+    contract_number: Optional[str] = Field(
+        default=None,
+        description=(
+            "Contract or supply point number as printed on the bill. " "Used for verification only."
+        ),
     )
     account_number: Optional[str] = Field(
         default=None,
-        description="Utility account number or client ID",
+        description="Utility account number or client ID printed on the bill",
     )
     meter_number: Optional[str] = Field(
         default=None,
-        description="Electric meter number",
+        description="Electric meter identifier printed on the bill",
     )
     service_address: Optional[str] = Field(
         default=None,
-        description="Service address for the energy account",
+        description="Service address for the energy account as printed on the bill",
     )
     tariff_category: Optional[str] = Field(
         default=None,
-        description="Tariff category (e.g., Industrial, Commercial, Residential)",
+        description=(
+            "Tariff category / bill type as stated on the bill. "
+            "Examples: Sin Demanda, Demanda Horaria, Demanda Horaria Diferenciada, Con Demanda, "
+            "Industrial, Commercial, Residential."
+        ),
+    )
+    power_factor: Optional[float] = Field(
+        default=None,
+        description=(
+            "Power factor (FP) for the billing period as printed on the bill (e.g., 0.9784). "
+            "Dimensionless value between 0 and 1."
+        ),
     )
 
     # -------------------------------------------------------------------------
-    # Monthly Consumption Data (Table - 12 months)
+    # Billing Period Identification
     # -------------------------------------------------------------------------
-    monthly_consumption: List[MonthlyEnergyConsumptionEntry] = Field(
-        description="Monthly energy consumption data for 12 months"
+    month: str = Field(description="Calendar month of the billing period (e.g., 'January' or '1')")
+    year: Optional[int] = Field(
+        default=None,
+        description="Calendar year of the billing period (e.g., 2025)",
+    )
+    billing_period_start: Optional[str] = Field(
+        default=None,
+        description="Start date of the billing period shown on the bill (YYYY-MM-DD)",
+    )
+    billing_period_end: Optional[str] = Field(
+        default=None,
+        description="End date of the billing period shown on the bill (YYYY-MM-DD)",
     )
 
     # -------------------------------------------------------------------------
-    # Computed Annual Totals
+    # Energy Consumption
+    # -------------------------------------------------------------------------
+    energy_consumption_kwh: float = Field(
+        description=(
+            "Total energy consumed this billing period in kWh. "
+            "In the detail table, sum 'Consumo Total' for every row whose Unidad Medida is kWh "
+            "(Energia act. hor. A + B + C, and D if present). "
+            "For bill type 4 (Con Demanda - single energy row), use that row's Consumo Total directly. "
+            "Convert MWh or GWh to kWh."
+        )
+    )
+
+    # -------------------------------------------------------------------------
+    # Demand Values
+    # -------------------------------------------------------------------------
+    average_demand_kw: Optional[float] = Field(
+        default=None,
+        description=(
+            "Billable demand for this billing period in kW. "
+            "Read from the 'Demanda facturable' row, Consumo Total column (unit kW). "
+            "Set to null if no 'Demanda facturable' row exists (bill type 1 - Sin Demanda). "
+            "Convert MW to kW if needed."
+        ),
+    )
+
+    # -------------------------------------------------------------------------
+    # Tariff & Cost
+    # -------------------------------------------------------------------------
+    energy_tariff_usd_kwh: Optional[float] = Field(
+        default=None,
+        description=(
+            "Computed monthly weighted energy tariff in USD/kWh for this billing period. "
+            "Formula: total_bill_amount_usd / energy_consumption_kwh. "
+            "Use values computed from kWh detail rows. "
+            "Round to 4 decimal places."
+        ),
+    )
+    total_bill_amount_usd: Optional[float] = Field(
+        default=None,
+        description=(
+            "Total energy charge in USD for this billing period. "
+            "Sum the 'Monto' column for all kWh rows in the detail table "
+            "(Energia act. hor. A + B + C + D if present). "
+            "For bill type 4 (single energy row), use that row's Monto directly."
+        ),
+    )
+
+
+class EnergyConsumptionBillsCollection(BaseModel):
+    """
+    Top-level extraction schema for energy consumption bills.
+
+    Users upload one document per month. Each month is represented as one
+    entry in `monthly_consumption` (a List[EnergyConsumptionBillsData]).
+
+    Annual aggregation is performed downstream after collecting all monthly entries.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # -------------------------------------------------------------------------
+    # Monthly Consumption Data (array; one entry = one uploaded monthly bill)
+    # -------------------------------------------------------------------------
+    monthly_consumption: List[EnergyConsumptionBillsData] = Field(
+        description=(
+            "Monthly bill entries extracted from uploaded documents. "
+            "Each entry contains account/provider metadata, billing period, and consumption values."
+        )
+    )
+
+    # -------------------------------------------------------------------------
+    # Computed Annual Totals (populated downstream after all months collected)
     # -------------------------------------------------------------------------
     annual_energy_consumption_kwh: Optional[float] = Field(
         default=None,
-        description="Total annual energy consumption in kWh - Computed as sum of monthly consumption",
+        description=(
+            "Total annual energy consumption in kWh - "
+            "sum of energy_consumption_kwh across all monthly entries. "
+            "Leave null for single-month extraction; compute downstream."
+        ),
     )
-    annual_energy_tariff_usd_kwh: Optional[float] = Field(
+    annual_average_demand_kw: Optional[float] = Field(
         default=None,
-        description="Weighted average annual energy tariff in $/kWh - Computed from monthly consumption and tariffs",
+        description=(
+            "Annual average demand in kW - "
+            "sum of average_demand_kw across all 12 monthly entries divided by 12. "
+            "Leave null if no monthly demand values are available; compute downstream."
+        ),
     )
 
-    # -------------------------------------------------------------------------
-    # Consumption Profile Graph Data (Computed)
-    # -------------------------------------------------------------------------
-    consumption_profile_graph_data: Optional[dict] = Field(
-        default=None,
-        description="Data for generating monthly consumption and demand bar charts (line/bar charts)",
-    )
+    def compute_annual_totals(self) -> "EnergyConsumptionBillsCollection":
+        """Compute annual energy consumption and average demand from monthly entries."""
+        if not self.monthly_consumption:
+            return self
 
-    def compute_annual_totals(self) -> "EnergyConsumptionBillsData":
-        """Compute annual energy consumption and weighted average tariff."""
-        if self.monthly_consumption:
-            # Sum annual consumption
-            total_consumption = sum(
-                m.energy_consumption_kwh
-                for m in self.monthly_consumption
-                if m.energy_consumption_kwh is not None
-            )
-            self.annual_energy_consumption_kwh = (
-                round(total_consumption, 2) if total_consumption else None
-            )
+        # Sum annual consumption across all monthly entries
+        total_consumption = sum(
+            m.energy_consumption_kwh
+            for m in self.monthly_consumption
+            if m.energy_consumption_kwh is not None
+        )
+        self.annual_energy_consumption_kwh = (
+            round(total_consumption, 2) if total_consumption else None
+        )
 
-            # Compute weighted average tariff
-            weighted_sum = 0.0
-            total_weight = 0.0
-            for m in self.monthly_consumption:
-                if m.energy_consumption_kwh and m.energy_tariff_usd_kwh:
-                    weighted_sum += m.energy_consumption_kwh * m.energy_tariff_usd_kwh
-                    total_weight += m.energy_consumption_kwh
-
-            if total_weight > 0:
-                self.annual_energy_tariff_usd_kwh = round(weighted_sum / total_weight, 4)
-
-            # Generate graph data
-            self.consumption_profile_graph_data = {
-                "months": [m.month for m in self.monthly_consumption],
-                "consumption_kwh": [m.energy_consumption_kwh for m in self.monthly_consumption],
-                "average_demand_kw": [m.average_demand_kw for m in self.monthly_consumption],
-                "peak_demand_kw": [m.peak_demand_kw for m in self.monthly_consumption],
-            }
+        # Annual average demand: sum of monthly average_demand_kw / 12
+        demand_values = [
+            m.average_demand_kw
+            for m in self.monthly_consumption
+            if m.average_demand_kw is not None
+        ]
+        if demand_values:
+            self.annual_average_demand_kw = round(sum(demand_values) / 12, 4)
 
         return self
 
@@ -1003,48 +1055,6 @@ class ProjectAcceptanceCertificatesData(BaseModel):
     certificates: List[ProjectAcceptanceCertificateEntry] = Field(
         description="List of project acceptance certificates (one entry per project)"
     )
-
-    # -------------------------------------------------------------------------
-    # Summary Statistics (computed)
-    # -------------------------------------------------------------------------
-    total_projects: Optional[int] = Field(
-        default=None,
-        description="Total number of projects with acceptance certificates",
-    )
-    total_capacity_kw: Optional[float] = Field(
-        default=None,
-        description="Total capacity of all projects in kW (sum of project capacities)",
-    )
-    provisional_certificates_count: Optional[int] = Field(
-        default=None,
-        description="Number of provisional acceptance certificates",
-    )
-    final_certificates_count: Optional[int] = Field(
-        default=None,
-        description="Number of final acceptance certificates",
-    )
-
-    def compute_summary(self) -> "ProjectAcceptanceCertificatesData":
-        """Compute summary statistics from certificates."""
-        if self.certificates:
-            self.total_projects = len(self.certificates)
-
-            # Sum capacities
-            capacities = [c.project_capacity_kw for c in self.certificates if c.project_capacity_kw]
-            self.total_capacity_kw = sum(capacities) if capacities else None
-
-            # Count certificate types
-            self.provisional_certificates_count = sum(
-                1
-                for c in self.certificates
-                if c.certificate_type and c.certificate_type.lower() == "provisional"
-            )
-            self.final_certificates_count = sum(
-                1
-                for c in self.certificates
-                if c.certificate_type and c.certificate_type.lower() == "final"
-            )
-        return self
 
 
 class OAMContractData(BaseModel):
@@ -1978,7 +1988,7 @@ PYDANTIC_MODELS: dict[DocumentType, Type[BaseModel]] = {
     DocumentType.CERTIFICATE_OF_LEGAL_EXISTENCE: LegalInformation,
     DocumentType.SHAREHOLDERS_DECLARATION: ShareholderStructure,
     DocumentType.LEGAL_REPRESENTATIVE_APPOINTMENT: LegalRepresentation,
-    DocumentType.ENERGY_CONSUMPTION_BILLS: EnergyConsumptionBillsData,
+    DocumentType.ENERGY_CONSUMPTION_BILLS: EnergyConsumptionBillsCollection,
     # Company Financials
     DocumentType.FINANCIAL_STATEMENTS: FinancialStatementsData,
     DocumentType.INCOME_TAX_FILINGS: IncomeTaxFilingsData,
