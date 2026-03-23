@@ -412,7 +412,7 @@ class ProjectSimulationReportData(BaseModel):
     project_name: str = Field(description="Project name (e.g., 'Biogemar - Santa Elena')")
     geographical_coordinates: Optional[str] = Field(
         default=None,
-        description='Geographical coordinates (e.g., "-02°06\'03", -080°44\'47"")',
+        description="Project site coordinates as a single value containing both latitude and longitude. Latitude is the geographical Y coordinate and longitude is the geographical X coordinate. Extract both coordinates exactly as shown in the document. Prefer decimal degrees when available; otherwise preserve degrees, minutes, and seconds notation. Include the sign or hemisphere for each value. Example: '-2.1008, -79.9467' or '-02°06\\'03\", -080°44\\'47\"'.",
     )
     elevation_m: Optional[float] = Field(default=None, description="Elevation in meters")
     land_cover: Optional[str] = Field(
@@ -423,7 +423,9 @@ class ProjectSimulationReportData(BaseModel):
         description="Annual Specific Photovoltaic Power Output in kWh/kWp",
     )
     total_pv_energy_mwh: float = Field(description="Total photovoltaic energy output in MWh")
-    performance_ratio_pct: float = Field(description="Performance ratio in %")
+    performance_ratio_pct: float = Field(
+        description="Performance Ratio. Extract the exact value as it appears in the document. Do NOT convert or multiply."
+    )
     air_temperature_c: Optional[float] = Field(
         default=None, description="Air temperature in Celsius"
     )
