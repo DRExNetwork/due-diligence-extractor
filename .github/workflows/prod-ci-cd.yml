@@ -38,4 +38,4 @@ jobs:
 
       - name: Trigger ECS Service Update
         run: |
-          aws ecs update-service --cluster cluster-fargate-drex --service ecs-prod-projects --task-definition task-fargate-prod-projects --force-new-deployment
+          aws ecs update-service --cluster cluster-fargate-prod --service ecs-prod-projects --task-definition task-fargate-prod-projects --force-new-deployment
