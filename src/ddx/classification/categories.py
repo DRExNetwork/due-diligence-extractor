@@ -10,11 +10,13 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple, Type
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pyparsing import Literal
 
 
 # =============================================================================
 # Top-Level Categories (Level 1)
 # =============================================================================
+YesNoAnswer = Literal["Yes", "No"]
 
 
 class TopLevelCategory(str, Enum):
@@ -434,9 +436,7 @@ class EnergyConsumptionBillsCollection(BaseModel):
 
         # Annual average demand: sum of monthly average_demand_kw / 12
         demand_values = [
-            m.average_demand_kw
-            for m in self.monthly_consumption
-            if m.average_demand_kw is not None
+            m.average_demand_kw for m in self.monthly_consumption if m.average_demand_kw is not None
         ]
         if demand_values:
             self.annual_average_demand_kw = round(sum(demand_values) / 12, 4)
@@ -1165,7 +1165,14 @@ class ESHSESMSPoliciesData(BaseModel):
     # -------------------------------------------------------------------------
     ohs_procedures_summary: Optional[str] = Field(
         default=None,
-        description="Summary of Occupational Health and Safety procedures (max 4 lines). Key safety protocols and procedures.",
+        description=(
+            "Summary of Occupational Health and Safety procedures (max 4 lines). "
+            "Key safety protocols and procedures. "
+            "Return the response in the same language as the source document. "
+            "If the document is in Spanish, answer in Spanish. "
+            "If the document is in English, answer in English. "
+            "Do not translate."
+        ),
     )
 
     # -------------------------------------------------------------------------
@@ -1173,7 +1180,14 @@ class ESHSESMSPoliciesData(BaseModel):
     # -------------------------------------------------------------------------
     hazardous_materials_handling: Optional[str] = Field(
         default=None,
-        description="Summary of hazardous materials handling procedures (max 4 lines). How hazardous materials are managed and disposed.",
+        description=(
+            "Summary of hazardous materials handling procedures (max 4 lines). "
+            "How hazardous materials are managed and disposed. "
+            "Return the response in the same language as the source document. "
+            "If the document is in Spanish, answer in Spanish. "
+            "If the document is in English, answer in English. "
+            "Do not translate."
+        ),
     )
 
     # -------------------------------------------------------------------------
@@ -1181,7 +1195,14 @@ class ESHSESMSPoliciesData(BaseModel):
     # -------------------------------------------------------------------------
     labor_procedures_workers_rights: Optional[str] = Field(
         default=None,
-        description="Summary of labor procedures and workers rights policies (max 4 lines). Worker protections and labor compliance.",
+        description=(
+            "Summary of labor procedures and workers rights policies (max 4 lines). "
+            "Worker protections and labor compliance. "
+            "Return the response in the same language as the source document. "
+            "If the document is in Spanish, answer in Spanish. "
+            "If the document is in English, answer in English. "
+            "Do not translate."
+        ),
     )
 
     # -------------------------------------------------------------------------
@@ -1189,7 +1210,14 @@ class ESHSESMSPoliciesData(BaseModel):
     # -------------------------------------------------------------------------
     waste_management_monitoring: Optional[str] = Field(
         default=None,
-        description="Summary of waste management and monitoring procedures (max 4 lines). Waste disposal and recycling practices.",
+        description=(
+            "Summary of waste management and monitoring procedures (max 4 lines). "
+            "Waste disposal and recycling practices. "
+            "Return the response in the same language as the source document. "
+            "If the document is in Spanish, answer in Spanish. "
+            "If the document is in English, answer in English. "
+            "Do not translate."
+        ),
     )
 
     # -------------------------------------------------------------------------
@@ -1197,7 +1225,14 @@ class ESHSESMSPoliciesData(BaseModel):
     # -------------------------------------------------------------------------
     resource_use_controls: Optional[str] = Field(
         default=None,
-        description="Summary of resource use controls (max 4 lines). Energy efficiency, water usage, and resource conservation measures.",
+        description=(
+            "Summary of resource use controls (max 4 lines). "
+            "Energy efficiency, water usage, and resource conservation measures. "
+            "Return the response in the same language as the source document. "
+            "If the document is in Spanish, answer in Spanish. "
+            "If the document is in English, answer in English. "
+            "Do not translate."
+        ),
     )
 
     # -------------------------------------------------------------------------
@@ -1305,7 +1340,13 @@ class QAQCCommissioningData(BaseModel):
     # -------------------------------------------------------------------------
     visual_inspection_summary: Optional[str] = Field(
         default=None,
-        description="Summary of visual inspection findings. Overall condition assessment.",
+        description=(
+            "Summary of visual inspection findings. Overall condition assessment. "
+            "Return the response in the same language as the source document. "
+            "If the document is in Spanish, answer in Spanish. "
+            "If the document is in English, answer in English. "
+            "Do not translate."
+        ),
     )
     visual_inspection_passed: Optional[bool] = Field(
         default=None,
@@ -1359,7 +1400,14 @@ class HRManualCodeOfConductData(BaseModel):
     # -------------------------------------------------------------------------
     ifc_aligned_hr_practices_summary: Optional[str] = Field(
         default=None,
-        description="Summary of IFC-aligned HR practices. Key HR policies that align with international standards.",
+        description=(
+            "Summary of IFC-aligned HR practices. "
+            "Key HR policies that align with international standards. "
+            "Return the response in the same language as the source document. "
+            "If the document is in Spanish, answer in Spanish. "
+            "If the document is in English, answer in English. "
+            "Do not translate."
+        ),
     )
 
     # -------------------------------------------------------------------------
@@ -1367,27 +1415,63 @@ class HRManualCodeOfConductData(BaseModel):
     # -------------------------------------------------------------------------
     non_discrimination_policy: Optional[str] = Field(
         default=None,
-        description="Summary of non-discrimination and equal opportunity policies",
+        description=(
+            "Summary of non-discrimination and equal opportunity policies. "
+            "Return the response in the same language as the source document. "
+            "If the document is in Spanish, answer in Spanish. "
+            "If the document is in English, answer in English. "
+            "Do not translate."
+        ),
     )
     grievance_mechanism: Optional[str] = Field(
         default=None,
-        description="Summary of grievance mechanism and complaint procedures",
+        description=(
+            "Summary of grievance mechanism and complaint procedures. "
+            "Return the response in the same language as the source document. "
+            "If the document is in Spanish, answer in Spanish. "
+            "If the document is in English, answer in English. "
+            "Do not translate."
+        ),
     )
     working_conditions: Optional[str] = Field(
         default=None,
-        description="Summary of working conditions policies (hours, overtime, leave)",
+        description=(
+            "Summary of working conditions policies (hours, overtime, leave). "
+            "Return the response in the same language as the source document. "
+            "If the document is in Spanish, answer in Spanish. "
+            "If the document is in English, answer in English. "
+            "Do not translate."
+        ),
     )
     child_labor_policy: Optional[str] = Field(
         default=None,
-        description="Summary of child labor prevention policy",
+        description=(
+            "Summary of child labor prevention policy. "
+            "Return the response in the same language as the source document. "
+            "If the document is in Spanish, answer in Spanish. "
+            "If the document is in English, answer in English. "
+            "Do not translate."
+        ),
     )
     forced_labor_policy: Optional[str] = Field(
         default=None,
-        description="Summary of forced labor prevention policy",
+        description=(
+            "Summary of forced labor prevention policy. "
+            "Return the response in the same language as the source document. "
+            "If the document is in Spanish, answer in Spanish. "
+            "If the document is in English, answer in English. "
+            "Do not translate."
+        ),
     )
     health_safety_policy: Optional[str] = Field(
         default=None,
-        description="Summary of occupational health and safety policies for workers",
+        description=(
+            "Summary of occupational health and safety policies for workers. "
+            "Return the response in the same language as the source document. "
+            "If the document is in Spanish, answer in Spanish. "
+            "If the document is in English, answer in English. "
+            "Do not translate."
+        ),
     )
 
     # -------------------------------------------------------------------------
@@ -1412,79 +1496,178 @@ class EnvironmentalLicenceEIAData(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    issuing_authority: Optional[str] = Field(default=None, description="Issuing authority")
-    license_number: Optional[str] = Field(default=None, description="License number")
+    issuing_authority: Optional[str] = Field(
+        default=None,
+        description=(
+            "Issuing authority. Extract exactly as written in the document. "
+            "Preserve the original document language."
+        ),
+    )
+    license_number: Optional[str] = Field(
+        default=None,
+        description=("License number. Extract exactly as written in the document."),
+    )
     issuing_date: Optional[str] = Field(
         default=None,
-        description="Issuing date (YYYY-MM-DD)",
+        description=("Issuing date in YYYY-MM-DD format."),
     )
     expiry_date: Optional[str] = Field(
         default=None,
-        description="Expiry date (YYYY-MM-DD)",
+        description=("Expiry date in YYYY-MM-DD format."),
     )
-    sensitive_habitats_present: Optional[bool] = Field(
+
+    sensitive_habitats_present: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether sensitive habitats are present (Yes/No)",
+        description=(
+            "Whether sensitive habitats are present. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
     )
     sensitive_habitats_description: Optional[str] = Field(
         default=None,
-        description="Sensitive habitats description (2-4 lines)",
+        description=(
+            "Sensitive habitats description in 2-4 lines. "
+            "Return the response in the same language as the source document. "
+            "If the document is in Spanish, answer in Spanish. "
+            "If the document is in English, answer in English. "
+            "Do not translate."
+        ),
     )
-    biodiversity_impacts_identified: Optional[bool] = Field(
+
+    biodiversity_impacts_identified: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether biodiversity impacts are identified (Yes/No)",
+        description=(
+            "Whether biodiversity impacts are identified. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
     )
     biodiversity_impacts_summary: Optional[str] = Field(
         default=None,
-        description="Biodiversity impacts summary (2-4 lines)",
+        description=(
+            "Biodiversity impacts summary in 2-4 lines. "
+            "Return the response in the same language as the source document. "
+            "If the document is in Spanish, answer in Spanish. "
+            "If the document is in English, answer in English. "
+            "Do not translate."
+        ),
     )
-    ecosystem_services_impacted: Optional[bool] = Field(
+
+    ecosystem_services_impacted: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether ecosystem services are impacted (Yes/No)",
+        description=(
+            "Whether ecosystem services are impacted. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
     )
     ecosystem_services_description: Optional[str] = Field(
         default=None,
-        description="Ecosystem services description (2-4 lines)",
+        description=(
+            "Ecosystem services description in 2-4 lines. "
+            "Return the response in the same language as the source document. "
+            "If the document is in Spanish, answer in Spanish. "
+            "If the document is in English, answer in English. "
+            "Do not translate."
+        ),
     )
+
     mitigation_measures_summary: Optional[str] = Field(
         default=None,
-        description="Mitigation measures summary (2-4 lines)",
+        description=(
+            "Mitigation measures summary in 2-4 lines. "
+            "Return the response in the same language as the source document. "
+            "If the document is in Spanish, answer in Spanish. "
+            "If the document is in English, answer in English. "
+            "Do not translate."
+        ),
     )
-    neighboring_populations_present: Optional[bool] = Field(
+
+    neighboring_populations_present: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether neighboring populations are present (Yes/No)",
+        description=(
+            "Whether neighboring populations are present. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
     )
     neighboring_populations_description: Optional[str] = Field(
         default=None,
-        description="Neighboring populations description (2-4 lines)",
+        description=(
+            "Neighboring populations description in 2-4 lines. "
+            "Return the response in the same language as the source document. "
+            "If the document is in Spanish, answer in Spanish. "
+            "If the document is in English, answer in English. "
+            "Do not translate."
+        ),
     )
-    critical_infrastructure_nearby: Optional[bool] = Field(
+
+    critical_infrastructure_nearby: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether critical infrastructure is nearby (Yes/No)",
+        description=(
+            "Whether critical infrastructure is nearby. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
     )
     critical_infrastructure_description: Optional[str] = Field(
         default=None,
-        description="Critical infrastructure description (2-4 lines)",
+        description=(
+            "Critical infrastructure description in 2-4 lines. "
+            "Return the response in the same language as the source document. "
+            "If the document is in Spanish, answer in Spanish. "
+            "If the document is in English, answer in English. "
+            "Do not translate."
+        ),
     )
-    cultural_heritage_assets_present: Optional[bool] = Field(
+
+    cultural_heritage_assets_present: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether cultural heritage assets are present (Yes/No)",
+        description=(
+            "Whether cultural heritage assets are present. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
     )
     cultural_heritage_description: Optional[str] = Field(
         default=None,
-        description="Cultural heritage description (2-4 lines)",
+        description=(
+            "Cultural heritage description in 2-4 lines. "
+            "Return the response in the same language as the source document. "
+            "If the document is in Spanish, answer in Spanish. "
+            "If the document is in English, answer in English. "
+            "Do not translate."
+        ),
     )
     cultural_heritage_protection_measures: Optional[str] = Field(
         default=None,
-        description="Cultural heritage protection measures (2-4 lines)",
+        description=(
+            "Cultural heritage protection measures in 2-4 lines. "
+            "Return the response in the same language as the source document. "
+            "If the document is in Spanish, answer in Spanish. "
+            "If the document is in English, answer in English. "
+            "Do not translate."
+        ),
     )
-    public_consultation_required: Optional[bool] = Field(
+
+    public_consultation_required: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether public consultation is required (Yes/No)",
+        description=(
+            "Whether public consultation is required. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
     )
     public_consultation_summary: Optional[str] = Field(
         default=None,
-        description="Public consultation summary (2-4 lines)",
+        description=(
+            "Public consultation summary in 2-4 lines. "
+            "Return the response in the same language as the source document. "
+            "If the document is in Spanish, answer in Spanish. "
+            "If the document is in English, answer in English. "
+            "Do not translate."
+        ),
     )
 
 
@@ -1593,7 +1776,13 @@ class SiteLegalStatusSummaryData(BaseModel):
     )
     property_disputes_summary: Optional[str] = Field(
         default=None,
-        description="Property disputes summary",
+        description=(
+            "Property disputes summary. "
+            "Return the response in the same language as the source document. "
+            "If the document is in Spanish, answer in Spanish. "
+            "If the document is in English, answer in English. "
+            "Do not translate."
+        ),
     )
     expropriation_risk_identified: Optional[bool] = Field(
         default=None,
