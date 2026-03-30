@@ -6,8 +6,10 @@ Supports two-level categorization: Top-level category → Document type
 """
 from __future__ import annotations
 
+import re
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple, Type
+from typing import Any, Dict, List, Literal, Optional, Tuple, Type
+from urllib.parse import quote
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -15,6 +17,18 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 # =============================================================================
 # Top-Level Categories (Level 1)
 # =============================================================================
+DocumentLanguageAnswer = Literal["Spanish", "English", "Other"]
+YesNoAnswer = Literal["Yes", "No"]
+YES_NO_RESPONSE_INSTRUCTION = (
+    "Return exactly one of: Yes, No. " "Do not return true/false or any other variant."
+)
+SOURCE_LANGUAGE_RESPONSE_INSTRUCTION = (
+    "Return the response in the language indicated by document_language. "
+    "If document_language is Spanish, answer entirely in Spanish. "
+    "If document_language is English, answer entirely in English. "
+    "Do not answer in English when document_language is Spanish. "
+    "Do not translate unless document_language explicitly requires it."
+)
 
 
 class TopLevelCategory(str, Enum):
@@ -434,9 +448,7 @@ class EnergyConsumptionBillsCollection(BaseModel):
 
         # Annual average demand: sum of monthly average_demand_kw / 12
         demand_values = [
-            m.average_demand_kw
-            for m in self.monthly_consumption
-            if m.average_demand_kw is not None
+            m.average_demand_kw for m in self.monthly_consumption if m.average_demand_kw is not None
         ]
         if demand_values:
             self.annual_average_demand_kw = round(sum(demand_values) / 12, 4)
@@ -840,6 +852,187 @@ def normalize_financial_statements_extraction(
     return normalized_extracted, normalized_metadata
 
 
+def _get_annual_filing_year(entry: Any) -> Optional[int]:
+    """Read a year value from an annual tax filing entry."""
+    if isinstance(entry, BaseModel):
+        return _coerce_year(getattr(entry, "fiscal_year", None))
+    if isinstance(entry, dict):
+        return _coerce_year(entry.get("fiscal_year"))
+    return None
+
+
+def _select_income_tax_filing_rows(
+    annual_filings: List[Any], fiscal_year: Optional[int]
+) -> Tuple[List[int], Optional[int]]:
+    """Pick the row indexes that belong to the document fiscal year."""
+    if not annual_filings:
+        return [], _coerce_year(fiscal_year)
+
+    target_year = _coerce_year(fiscal_year)
+    if target_year is None:
+        available_years = [
+            year
+            for year in (_get_annual_filing_year(entry) for entry in annual_filings)
+            if year is not None
+        ]
+        if available_years:
+            target_year = max(available_years)
+
+    if target_year is None:
+        return list(range(len(annual_filings))), None
+
+    selected_indexes = [
+        index
+        for index, entry in enumerate(annual_filings)
+        if _get_annual_filing_year(entry) == target_year
+    ]
+    if not selected_indexes:
+        return list(range(len(annual_filings))), target_year
+
+    # Keep at most one entry for the target year
+    return selected_indexes[:1], target_year
+
+
+def normalize_income_tax_filings_extraction(
+    extracted: Dict[str, Any],
+    extraction_metadata: Optional[Dict[str, Any]] = None,
+) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """Normalize extracted income tax filings data to the document fiscal year."""
+    annual_filings = extracted.get("annual_filings")
+    if not isinstance(annual_filings, list):
+        return extracted, extraction_metadata
+
+    selected_indexes, target_year = _select_income_tax_filing_rows(
+        annual_filings,
+        extracted.get("fiscal_year"),
+    )
+
+    normalized_extracted = dict(extracted)
+    if target_year is not None:
+        normalized_extracted["fiscal_year"] = target_year
+
+    if selected_indexes and len(selected_indexes) != len(annual_filings):
+        normalized_extracted["annual_filings"] = [
+            annual_filings[index] for index in selected_indexes
+        ]
+
+    normalized_metadata = extraction_metadata
+    if isinstance(extraction_metadata, dict):
+        normalized_metadata = dict(extraction_metadata)
+        metadata_rows = extraction_metadata.get("annual_filings")
+        if isinstance(metadata_rows, list):
+            normalized_metadata["annual_filings"] = [
+                metadata_rows[index] for index in selected_indexes if index < len(metadata_rows)
+            ]
+
+    return normalized_extracted, normalized_metadata
+
+
+def _select_cash_flow_year_rows(
+    annual_cash_flows: List[Any], fiscal_year: Optional[int]
+) -> Tuple[List[int], Optional[int]]:
+    """Pick the row indexes that belong to the document fiscal year."""
+    if not annual_cash_flows:
+        return [], _coerce_year(fiscal_year)
+
+    target_year = _coerce_year(fiscal_year)
+    if target_year is None:
+        available_years = [
+            year
+            for year in (_get_annual_filing_year(entry) for entry in annual_cash_flows)
+            if year is not None
+        ]
+        if available_years:
+            target_year = max(available_years)
+
+    if target_year is None:
+        return list(range(len(annual_cash_flows))), None
+
+    selected_indexes = [
+        index
+        for index, entry in enumerate(annual_cash_flows)
+        if _get_annual_filing_year(entry) == target_year
+    ]
+    if not selected_indexes:
+        return list(range(len(annual_cash_flows))), target_year
+
+    # Keep at most one entry for the target year
+    return selected_indexes[:1], target_year
+
+
+def normalize_cash_flow_statements_extraction(
+    extracted: Dict[str, Any],
+    extraction_metadata: Optional[Dict[str, Any]] = None,
+) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """Normalize extracted cash flow statements data to the document fiscal year."""
+    annual_cash_flows = extracted.get("annual_cash_flows")
+    if not isinstance(annual_cash_flows, list):
+        return extracted, extraction_metadata
+
+    selected_indexes, target_year = _select_cash_flow_year_rows(
+        annual_cash_flows,
+        extracted.get("fiscal_year"),
+    )
+
+    normalized_extracted = dict(extracted)
+    if target_year is not None:
+        normalized_extracted["fiscal_year"] = target_year
+
+    if selected_indexes and len(selected_indexes) != len(annual_cash_flows):
+        normalized_extracted["annual_cash_flows"] = [
+            annual_cash_flows[index] for index in selected_indexes
+        ]
+
+    normalized_metadata = extraction_metadata
+    if isinstance(extraction_metadata, dict):
+        normalized_metadata = dict(extraction_metadata)
+        metadata_rows = extraction_metadata.get("annual_cash_flows")
+        if isinstance(metadata_rows, list):
+            normalized_metadata["annual_cash_flows"] = [
+                metadata_rows[index] for index in selected_indexes if index < len(metadata_rows)
+            ]
+
+    return normalized_extracted, normalized_metadata
+
+
+_COORD_NUMBER_RE = re.compile(r"[-+]?\d+(?:\.\d+)?")
+
+
+def _parse_coordinate_component(value: str, negative_directions: set) -> Optional[float]:
+    """Parse a single lat or lon component from various notations."""
+    cleaned = value.upper().replace("(", " ").replace(")", " ")
+    direction = next(
+        (d for d in ("N", "S", "E", "W") if d in cleaned),
+        None,
+    )
+    numbers = [abs(float(m)) for m in _COORD_NUMBER_RE.findall(cleaned)]
+    if not numbers:
+        return None
+    decimal = numbers[0]
+    if len(numbers) > 1:
+        decimal += numbers[1] / 60.0
+    if len(numbers) > 2:
+        decimal += numbers[2] / 3600.0
+    if direction is not None:
+        sign = -1.0 if direction in negative_directions else 1.0
+    else:
+        sign = -1.0 if cleaned.lstrip().startswith("-") else 1.0
+    return sign * decimal
+
+
+def _build_google_maps_link(raw_coordinates: Optional[str]) -> Optional[str]:
+    """Build a Google Maps URL from extracted geographical coordinates."""
+    if not raw_coordinates:
+        return None
+    parts = [p.strip() for p in raw_coordinates.split(",", 1)]
+    if len(parts) == 2:
+        lat = _parse_coordinate_component(parts[0], {"S"})
+        lng = _parse_coordinate_component(parts[1], {"W"})
+        if lat is not None and lng is not None:
+            return f"https://www.google.com/maps?q={lat:.8f},{lng:.8f}"
+    return f"https://www.google.com/maps/search/?api=1&query={quote(raw_coordinates)}"
+
+
 def normalize_extracted_document(
     document_type: DocumentType | str,
     extracted: Dict[str, Any],
@@ -855,6 +1048,19 @@ def normalize_extracted_document(
 
     if doc_type_value == DocumentType.FINANCIAL_STATEMENTS.value:
         return normalize_financial_statements_extraction(extracted, extraction_metadata)
+
+    if doc_type_value == DocumentType.INCOME_TAX_FILINGS.value:
+        return normalize_income_tax_filings_extraction(extracted, extraction_metadata)
+
+    if doc_type_value == DocumentType.CASH_FLOW_STATEMENTS.value:
+        return normalize_cash_flow_statements_extraction(extracted, extraction_metadata)
+
+    if doc_type_value == DocumentType.PROJECT_SIMULATION_REPORT.value:
+        normalized = dict(extracted)
+        normalized["google_maps_link"] = _build_google_maps_link(
+            normalized.get("geographical_coordinates")
+        )
+        return normalized, extraction_metadata
 
     return extracted, extraction_metadata
 
@@ -875,8 +1081,8 @@ class IncomeTaxFilingsData(BaseModel):
     """
     Schema for Income Tax Filings (Section 1.3).
 
-    Extracts tax payment information from SRI/Tax Authority filings
-    for minimum 3 years.
+    Extracts tax payment information from a single SRI/Tax Authority filing.
+    Each document covers exactly one fiscal year.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -885,12 +1091,52 @@ class IncomeTaxFilingsData(BaseModel):
         default=None, description="Company name as stated in the tax filings"
     )
     tax_id_ruc: Optional[str] = Field(default=None, description="Tax ID (RUC) number")
-    tax_authority: Optional[str] = Field(
-        default=None, description="Tax authority name (e.g., SRI for Ecuador)"
+    # tax_authority: Optional[str] = Field(
+    #     default=None, description="Tax authority name (e.g., SRI for Ecuador)"
+    # )
+    fiscal_year: Optional[int] = Field(
+        default=None,
+        description=(
+            "Fiscal year of the document being extracted (e.g., 2021). "
+            "Each document covers a single year."
+        ),
     )
     annual_filings: List[AnnualTaxFiling] = Field(
-        description="Tax filing data for each fiscal year"
+        description=(
+            "Tax filing data for the document's fiscal year only. "
+            "Return exactly one entry matching the document year. "
+            "Do not include prior-year or comparative data."
+        )
     )
+
+    @model_validator(mode="after")
+    def normalize_to_document_fiscal_year(self) -> "IncomeTaxFilingsData":
+        """Keep only the filing entry that belongs to the document's fiscal year."""
+        if not self.annual_filings:
+            return self
+
+        target_year = _coerce_year(self.fiscal_year)
+
+        if target_year is None:
+            available_years = [
+                _coerce_year(entry.fiscal_year)
+                for entry in self.annual_filings
+                if _coerce_year(entry.fiscal_year) is not None
+            ]
+            if available_years:
+                target_year = max(available_years)
+
+        if target_year is not None:
+            self.fiscal_year = target_year
+            matched = [
+                entry
+                for entry in self.annual_filings
+                if _coerce_year(entry.fiscal_year) == target_year
+            ]
+            if matched:
+                self.annual_filings = matched[:1]
+
+        return self
 
 
 class AnnualCashFlow(BaseModel):
@@ -902,22 +1148,14 @@ class AnnualCashFlow(BaseModel):
     operating_cash_flow: Optional[float] = Field(
         default=None, description="Net cash from operating activities"
     )
-    investing_cash_flow: Optional[float] = Field(
-        default=None, description="Net cash from investing activities"
-    )
-    financing_cash_flow: Optional[float] = Field(
-        default=None, description="Net cash from financing activities"
-    )
-    net_change_in_cash: Optional[float] = Field(
-        default=None, description="Net change in cash and cash equivalents"
-    )
 
 
 class CashFlowStatementsData(BaseModel):
     """
     Schema for Cash Flow Statements (Section 1.4).
 
-    Note: Per requirements, this may only be provided for 1 year.
+    Extracts cash flow data for the document's fiscal year only.
+    Each document covers exactly one fiscal year.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -926,9 +1164,49 @@ class CashFlowStatementsData(BaseModel):
         default=None, description="Company name as stated in the cash flow statements"
     )
     currency: Optional[str] = Field(default=None, description="Currency used (e.g., USD, EUR)")
-    annual_cash_flows: List[AnnualCashFlow] = Field(
-        description="Cash flow data for each fiscal year"
+    fiscal_year: Optional[int] = Field(
+        default=None,
+        description=(
+            "Fiscal year of the document being extracted (e.g., 2021). "
+            "Each document covers a single year."
+        ),
     )
+    annual_cash_flows: List[AnnualCashFlow] = Field(
+        description=(
+            "Cash flow data for the document's fiscal year only. "
+            "Return exactly one entry matching the document year. "
+            "Do not include prior-year or comparative data."
+        )
+    )
+
+    @model_validator(mode="after")
+    def normalize_to_document_fiscal_year(self) -> "CashFlowStatementsData":
+        """Keep only the cash flow entry that belongs to the document's fiscal year."""
+        if not self.annual_cash_flows:
+            return self
+
+        target_year = _coerce_year(self.fiscal_year)
+
+        if target_year is None:
+            available_years = [
+                _coerce_year(entry.fiscal_year)
+                for entry in self.annual_cash_flows
+                if _coerce_year(entry.fiscal_year) is not None
+            ]
+            if available_years:
+                target_year = max(available_years)
+
+        if target_year is not None:
+            self.fiscal_year = target_year
+            matched = [
+                entry
+                for entry in self.annual_cash_flows
+                if _coerce_year(entry.fiscal_year) == target_year
+            ]
+            if matched:
+                self.annual_cash_flows = matched[:1]
+
+        return self
 
 
 class TaxComplianceCertificateData(BaseModel):
@@ -952,9 +1230,12 @@ class TaxComplianceCertificateData(BaseModel):
     tax_compliance_status: str = Field(
         description="Compliance status text (e.g., 'Compliant', 'No outstanding debts', 'Al día en obligaciones')"
     )
-    has_outstanding_debts: Optional[bool] = Field(
+    has_outstanding_debts: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether there are outstanding tax debts (should be False for compliant status)",
+        description=(
+            "Whether there are outstanding tax debts. "
+            "For a compliant status, the expected answer is No. " + YES_NO_RESPONSE_INSTRUCTION
+        ),
     )
     validity_period: Optional[str] = Field(
         default=None, description="Period the certificate is valid for (if specified)"
@@ -1016,9 +1297,10 @@ class ProjectAcceptanceCertificateEntry(BaseModel):
     # -------------------------------------------------------------------------
     # Signature Confirmation
     # -------------------------------------------------------------------------
-    signed_by_client: Optional[bool] = Field(
+    signed_by_client: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether the certificate is signed by the client (Yes/No)",
+        description="Whether the certificate is signed by the client. "
+        + YES_NO_RESPONSE_INSTRUCTION,
     )
     signatory_name: Optional[str] = Field(
         default=None,
@@ -1155,9 +1437,11 @@ class ESHSESMSPoliciesData(BaseModel):
     # -------------------------------------------------------------------------
     # ESMS Aligned with IFC Performance Standards
     # -------------------------------------------------------------------------
-    esms_aligned_with_ifc_performance_standards: Optional[bool] = Field(
+    esms_aligned_with_ifc_performance_standards: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether the ESMS aligns with IFC Performance Standards (Yes/No)",
+        description=(
+            "Whether the ESMS aligns with IFC Performance Standards. " + YES_NO_RESPONSE_INSTRUCTION
+        ),
     )
 
     # -------------------------------------------------------------------------
@@ -1165,7 +1449,10 @@ class ESHSESMSPoliciesData(BaseModel):
     # -------------------------------------------------------------------------
     ohs_procedures_summary: Optional[str] = Field(
         default=None,
-        description="Summary of Occupational Health and Safety procedures (max 4 lines). Key safety protocols and procedures.",
+        description=(
+            "Summary of Occupational Health and Safety procedures (max 4 lines). "
+            "Key safety protocols and procedures. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
 
     # -------------------------------------------------------------------------
@@ -1173,7 +1460,11 @@ class ESHSESMSPoliciesData(BaseModel):
     # -------------------------------------------------------------------------
     hazardous_materials_handling: Optional[str] = Field(
         default=None,
-        description="Summary of hazardous materials handling procedures (max 4 lines). How hazardous materials are managed and disposed.",
+        description=(
+            "Summary of hazardous materials handling procedures (max 4 lines). "
+            "How hazardous materials are managed and disposed. "
+            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
 
     # -------------------------------------------------------------------------
@@ -1181,7 +1472,10 @@ class ESHSESMSPoliciesData(BaseModel):
     # -------------------------------------------------------------------------
     labor_procedures_workers_rights: Optional[str] = Field(
         default=None,
-        description="Summary of labor procedures and workers rights policies (max 4 lines). Worker protections and labor compliance.",
+        description=(
+            "Summary of labor procedures and workers rights policies (max 4 lines). "
+            "Worker protections and labor compliance. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
 
     # -------------------------------------------------------------------------
@@ -1189,7 +1483,10 @@ class ESHSESMSPoliciesData(BaseModel):
     # -------------------------------------------------------------------------
     waste_management_monitoring: Optional[str] = Field(
         default=None,
-        description="Summary of waste management and monitoring procedures (max 4 lines). Waste disposal and recycling practices.",
+        description=(
+            "Summary of waste management and monitoring procedures (max 4 lines). "
+            "Waste disposal and recycling practices. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
 
     # -------------------------------------------------------------------------
@@ -1197,7 +1494,11 @@ class ESHSESMSPoliciesData(BaseModel):
     # -------------------------------------------------------------------------
     resource_use_controls: Optional[str] = Field(
         default=None,
-        description="Summary of resource use controls (max 4 lines). Energy efficiency, water usage, and resource conservation measures.",
+        description=(
+            "Summary of resource use controls (max 4 lines). "
+            "Energy efficiency, water usage, and resource conservation measures. "
+            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
 
     # -------------------------------------------------------------------------
@@ -1305,11 +1606,14 @@ class QAQCCommissioningData(BaseModel):
     # -------------------------------------------------------------------------
     visual_inspection_summary: Optional[str] = Field(
         default=None,
-        description="Summary of visual inspection findings. Overall condition assessment.",
+        description=(
+            "Summary of visual inspection findings. Overall condition assessment. "
+            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
-    visual_inspection_passed: Optional[bool] = Field(
+    visual_inspection_passed: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether visual inspection passed (True/False)",
+        description="Whether visual inspection passed. " + YES_NO_RESPONSE_INSTRUCTION,
     )
 
     # -------------------------------------------------------------------------
@@ -1359,7 +1663,11 @@ class HRManualCodeOfConductData(BaseModel):
     # -------------------------------------------------------------------------
     ifc_aligned_hr_practices_summary: Optional[str] = Field(
         default=None,
-        description="Summary of IFC-aligned HR practices. Key HR policies that align with international standards.",
+        description=(
+            "Summary of IFC-aligned HR practices. "
+            "Key HR policies that align with international standards. "
+            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
 
     # -------------------------------------------------------------------------
@@ -1367,27 +1675,43 @@ class HRManualCodeOfConductData(BaseModel):
     # -------------------------------------------------------------------------
     non_discrimination_policy: Optional[str] = Field(
         default=None,
-        description="Summary of non-discrimination and equal opportunity policies",
+        description=(
+            "Summary of non-discrimination and equal opportunity policies. "
+            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
     grievance_mechanism: Optional[str] = Field(
         default=None,
-        description="Summary of grievance mechanism and complaint procedures",
+        description=(
+            "Summary of grievance mechanism and complaint procedures. "
+            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
     working_conditions: Optional[str] = Field(
         default=None,
-        description="Summary of working conditions policies (hours, overtime, leave)",
+        description=(
+            "Summary of working conditions policies (hours, overtime, leave). "
+            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
     child_labor_policy: Optional[str] = Field(
         default=None,
-        description="Summary of child labor prevention policy",
+        description=(
+            "Summary of child labor prevention policy. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
     forced_labor_policy: Optional[str] = Field(
         default=None,
-        description="Summary of forced labor prevention policy",
+        description=(
+            "Summary of forced labor prevention policy. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
     health_safety_policy: Optional[str] = Field(
         default=None,
-        description="Summary of occupational health and safety policies for workers",
+        description=(
+            "Summary of occupational health and safety policies for workers. "
+            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
 
     # -------------------------------------------------------------------------
@@ -1412,79 +1736,153 @@ class EnvironmentalLicenceEIAData(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    issuing_authority: Optional[str] = Field(default=None, description="Issuing authority")
-    license_number: Optional[str] = Field(default=None, description="License number")
+    document_language: Optional[DocumentLanguageAnswer] = Field(
+        default=None,
+        description=(
+            "Primary language of the source document. "
+            "Return exactly one of: Spanish, English, Other."
+        ),
+    )
+
+    issuing_authority: Optional[str] = Field(
+        default=None,
+        description=(
+            "Issuing authority. Extract exactly as written in the document. "
+            "Preserve the original document language."
+        ),
+    )
+    license_number: Optional[str] = Field(
+        default=None,
+        description=("License number. Extract exactly as written in the document."),
+    )
     issuing_date: Optional[str] = Field(
         default=None,
-        description="Issuing date (YYYY-MM-DD)",
+        description=("Issuing date in YYYY-MM-DD format."),
     )
     expiry_date: Optional[str] = Field(
         default=None,
-        description="Expiry date (YYYY-MM-DD)",
+        description=("Expiry date in YYYY-MM-DD format."),
     )
-    sensitive_habitats_present: Optional[bool] = Field(
+
+    sensitive_habitats_present: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether sensitive habitats are present (Yes/No)",
+        description=(
+            "Whether sensitive habitats are present. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
     )
     sensitive_habitats_description: Optional[str] = Field(
         default=None,
-        description="Sensitive habitats description (2-4 lines)",
+        description=(
+            "Sensitive habitats description in 2-4 lines. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
-    biodiversity_impacts_identified: Optional[bool] = Field(
+
+    biodiversity_impacts_identified: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether biodiversity impacts are identified (Yes/No)",
+        description=(
+            "Whether biodiversity impacts are identified. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
     )
     biodiversity_impacts_summary: Optional[str] = Field(
         default=None,
-        description="Biodiversity impacts summary (2-4 lines)",
+        description=(
+            "Biodiversity impacts summary in 2-4 lines. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
-    ecosystem_services_impacted: Optional[bool] = Field(
+
+    ecosystem_services_impacted: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether ecosystem services are impacted (Yes/No)",
+        description=(
+            "Whether ecosystem services are impacted. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
     )
     ecosystem_services_description: Optional[str] = Field(
         default=None,
-        description="Ecosystem services description (2-4 lines)",
+        description=(
+            "Ecosystem services description in 2-4 lines. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
+
     mitigation_measures_summary: Optional[str] = Field(
         default=None,
-        description="Mitigation measures summary (2-4 lines)",
+        description=(
+            "Mitigation measures summary in 2-4 lines. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
-    neighboring_populations_present: Optional[bool] = Field(
+
+    neighboring_populations_present: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether neighboring populations are present (Yes/No)",
+        description=(
+            "Whether neighboring populations are present. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
     )
     neighboring_populations_description: Optional[str] = Field(
         default=None,
-        description="Neighboring populations description (2-4 lines)",
+        description=(
+            "Neighboring populations description in 2-4 lines. "
+            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
-    critical_infrastructure_nearby: Optional[bool] = Field(
+
+    critical_infrastructure_nearby: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether critical infrastructure is nearby (Yes/No)",
+        description=(
+            "Whether critical infrastructure is nearby. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
     )
     critical_infrastructure_description: Optional[str] = Field(
         default=None,
-        description="Critical infrastructure description (2-4 lines)",
+        description=(
+            "Critical infrastructure description in 2-4 lines. "
+            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
-    cultural_heritage_assets_present: Optional[bool] = Field(
+
+    cultural_heritage_assets_present: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether cultural heritage assets are present (Yes/No)",
+        description=(
+            "Whether cultural heritage assets are present. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
     )
     cultural_heritage_description: Optional[str] = Field(
         default=None,
-        description="Cultural heritage description (2-4 lines)",
+        description=(
+            "Cultural heritage description in 2-4 lines. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
     cultural_heritage_protection_measures: Optional[str] = Field(
         default=None,
-        description="Cultural heritage protection measures (2-4 lines)",
+        description=(
+            "Cultural heritage protection measures in 2-4 lines. "
+            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
-    public_consultation_required: Optional[bool] = Field(
+
+    public_consultation_required: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether public consultation is required (Yes/No)",
+        description=(
+            "Whether public consultation is required. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
     )
     public_consultation_summary: Optional[str] = Field(
         default=None,
-        description="Public consultation summary (2-4 lines)",
+        description=(
+            "Public consultation summary in 2-4 lines. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
 
 
@@ -1511,17 +1909,17 @@ class EmergencyResponseSecurityPlanData(BaseModel):
         default=None,
         description="Risks covered (e.g., flood, fire, drought)",
     )
-    climate_extreme_events_covered: Optional[bool] = Field(
+    climate_extreme_events_covered: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether climate extreme events are covered (Yes/No)",
+        description="Whether climate extreme events are covered. " + YES_NO_RESPONSE_INSTRUCTION,
     )
     climate_adaptation_actions: Optional[str] = Field(
         default=None,
         description="Climate adaptation actions",
     )
-    security_risks_covered: Optional[bool] = Field(
+    security_risks_covered: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether security risks are covered (Yes/No)",
+        description="Whether security risks are covered. " + YES_NO_RESPONSE_INSTRUCTION,
     )
     security_arrangements: Optional[str] = Field(
         default=None,
@@ -1535,9 +1933,10 @@ class EmergencyResponseSecurityPlanData(BaseModel):
         default=None,
         description="Emergency response protocols",
     )
-    coordination_with_authorities: Optional[bool] = Field(
+    coordination_with_authorities: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether there is coordination with authorities (Yes/No)",
+        description="Whether there is coordination with authorities. "
+        + YES_NO_RESPONSE_INSTRUCTION,
     )
 
 
@@ -1579,25 +1978,27 @@ class SiteLegalStatusSummaryData(BaseModel):
         default=None,
         description="Lease contracts (lessor, term, expiry)",
     )
-    collective_rights_indigenous_claims: Optional[bool] = Field(
+    collective_rights_indigenous_claims: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether collective rights or indigenous claims exist (Yes/No)",
+        description=(
+            "Whether collective rights or indigenous claims exist. " + YES_NO_RESPONSE_INSTRUCTION
+        ),
     )
     collective_rights_description: Optional[str] = Field(
         default=None,
         description="Collective rights description",
     )
-    known_property_disputes: Optional[bool] = Field(
+    known_property_disputes: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether known property disputes exist (Yes/No)",
+        description="Whether known property disputes exist. " + YES_NO_RESPONSE_INSTRUCTION,
     )
     property_disputes_summary: Optional[str] = Field(
         default=None,
-        description="Property disputes summary",
+        description=("Property disputes summary. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION),
     )
-    expropriation_risk_identified: Optional[bool] = Field(
+    expropriation_risk_identified: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether expropriation risk is identified (Yes/No)",
+        description="Whether expropriation risk is identified. " + YES_NO_RESPONSE_INSTRUCTION,
     )
     expropriation_risk_description: Optional[str] = Field(
         default=None,
@@ -1624,9 +2025,9 @@ class LiensCertificateData(BaseModel):
         default=None,
         description="Existing mortgages (bank, amount, date)",
     )
-    need_for_lender_consent: Optional[bool] = Field(
+    need_for_lender_consent: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether lender consent is needed (Yes/No)",
+        description="Whether lender consent is needed. " + YES_NO_RESPONSE_INSTRUCTION,
     )
 
 
@@ -1635,9 +2036,9 @@ class NonOverlapProtectedAreasCertificateData(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    protected_area_presence: Optional[bool] = Field(
+    protected_area_presence: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether protected area presence is indicated (Yes/No)",
+        description="Whether protected area presence is indicated. " + YES_NO_RESPONSE_INSTRUCTION,
     )
     geographic_reference: Optional[str] = Field(
         default=None,
@@ -1659,25 +2060,45 @@ class HRPolicyCodeOfConductData(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    human_rights_policy_exists: Optional[bool] = Field(
+    human_rights_policy_exists: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether a human rights policy exists (Yes/No)",
+        description=(
+            "Whether a human rights policy exists. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
     )
-    labor_standards_policy_exists: Optional[bool] = Field(
+    labor_standards_policy_exists: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether a labor standards policy exists (Yes/No)",
+        description=(
+            "Whether a labor standards policy exists. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
     )
-    prohibition_of_forced_labor: Optional[bool] = Field(
+    prohibition_of_forced_labor: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether forced labor is explicitly prohibited (Yes/No)",
+        description=(
+            "Whether forced labor is explicitly prohibited. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
     )
-    prohibition_of_child_labor: Optional[bool] = Field(
+    prohibition_of_child_labor: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether child labor is explicitly prohibited (Yes/No)",
+        description=(
+            "Whether child labor is explicitly prohibited. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
     )
-    non_discrimination_policy: Optional[bool] = Field(
+    non_discrimination_policy: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether a non-discrimination policy exists (Yes/No)",
+        description=(
+            "Whether a non-discrimination policy exists. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
     )
     supplier_labor_requirements: Optional[str] = Field(
         default=None,
@@ -1707,9 +2128,11 @@ class ElectricalUtilityFeasibilityReportData(BaseModel):
         default=None,
         description="Capacity requested in kW or MW (convert to kW if in MW)",
     )
-    feasibility_issued: Optional[bool] = Field(
+    feasibility_issued: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether feasibility has been issued/approved (Yes/No)",
+        description=(
+            "Whether feasibility has been issued or approved. " + YES_NO_RESPONSE_INSTRUCTION
+        ),
     )
     available_hosting_capacity_kw: Optional[float] = Field(
         default=None,

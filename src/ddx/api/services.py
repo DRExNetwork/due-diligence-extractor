@@ -210,6 +210,8 @@ async def _resolve_research_payload_for_extracted_data(
         return None
 
     cache_key = (module_brand or "", inverter_brand or "")
+    print("this is cache key", cache_key)
+    print("this is cache", cache)
     if cache_key not in cache:
         cache[cache_key] = await run_equipment_research_async(module_brand, inverter_brand)
 
@@ -325,6 +327,7 @@ async def _enrich_targeted_equipment_research(
             continue
 
         research_payload = await _resolve_research_payload_for_extracted_data(extracted_data, cache)
+        print("this is research payload", research_payload)
         if not research_payload:
             continue
 
