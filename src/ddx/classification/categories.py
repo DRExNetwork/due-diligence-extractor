@@ -852,6 +852,82 @@ def normalize_financial_statements_extraction(
     return normalized_extracted, normalized_metadata
 
 
+def _get_annual_filing_year(entry: Any) -> Optional[int]:
+    """Read a year value from an annual tax filing entry."""
+    if isinstance(entry, BaseModel):
+        return _coerce_year(getattr(entry, "fiscal_year", None))
+    if isinstance(entry, dict):
+        return _coerce_year(entry.get("fiscal_year"))
+    return None
+
+
+def _select_income_tax_filing_rows(
+    annual_filings: List[Any], fiscal_year: Optional[int]
+) -> Tuple[List[int], Optional[int]]:
+    """Pick the row indexes that belong to the document fiscal year."""
+    if not annual_filings:
+        return [], _coerce_year(fiscal_year)
+
+    target_year = _coerce_year(fiscal_year)
+    if target_year is None:
+        available_years = [
+            year
+            for year in (_get_annual_filing_year(entry) for entry in annual_filings)
+            if year is not None
+        ]
+        if available_years:
+            target_year = max(available_years)
+
+    if target_year is None:
+        return list(range(len(annual_filings))), None
+
+    selected_indexes = [
+        index
+        for index, entry in enumerate(annual_filings)
+        if _get_annual_filing_year(entry) == target_year
+    ]
+    if not selected_indexes:
+        return list(range(len(annual_filings))), target_year
+
+    # Keep at most one entry for the target year
+    return selected_indexes[:1], target_year
+
+
+def normalize_income_tax_filings_extraction(
+    extracted: Dict[str, Any],
+    extraction_metadata: Optional[Dict[str, Any]] = None,
+) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """Normalize extracted income tax filings data to the document fiscal year."""
+    annual_filings = extracted.get("annual_filings")
+    if not isinstance(annual_filings, list):
+        return extracted, extraction_metadata
+
+    selected_indexes, target_year = _select_income_tax_filing_rows(
+        annual_filings,
+        extracted.get("fiscal_year"),
+    )
+
+    normalized_extracted = dict(extracted)
+    if target_year is not None:
+        normalized_extracted["fiscal_year"] = target_year
+
+    if selected_indexes and len(selected_indexes) != len(annual_filings):
+        normalized_extracted["annual_filings"] = [
+            annual_filings[index] for index in selected_indexes
+        ]
+
+    normalized_metadata = extraction_metadata
+    if isinstance(extraction_metadata, dict):
+        normalized_metadata = dict(extraction_metadata)
+        metadata_rows = extraction_metadata.get("annual_filings")
+        if isinstance(metadata_rows, list):
+            normalized_metadata["annual_filings"] = [
+                metadata_rows[index] for index in selected_indexes if index < len(metadata_rows)
+            ]
+
+    return normalized_extracted, normalized_metadata
+
+
 _COORD_NUMBER_RE = re.compile(r"[-+]?\d+(?:\.\d+)?")
 
 
@@ -906,6 +982,9 @@ def normalize_extracted_document(
     if doc_type_value == DocumentType.FINANCIAL_STATEMENTS.value:
         return normalize_financial_statements_extraction(extracted, extraction_metadata)
 
+    if doc_type_value == DocumentType.INCOME_TAX_FILINGS.value:
+        return normalize_income_tax_filings_extraction(extracted, extraction_metadata)
+
     if doc_type_value == DocumentType.PROJECT_SIMULATION_REPORT.value:
         normalized = dict(extracted)
         normalized["google_maps_link"] = _build_google_maps_link(
@@ -932,8 +1011,8 @@ class IncomeTaxFilingsData(BaseModel):
     """
     Schema for Income Tax Filings (Section 1.3).
 
-    Extracts tax payment information from SRI/Tax Authority filings
-    for minimum 3 years.
+    Extracts tax payment information from a single SRI/Tax Authority filing.
+    Each document covers exactly one fiscal year.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -942,12 +1021,52 @@ class IncomeTaxFilingsData(BaseModel):
         default=None, description="Company name as stated in the tax filings"
     )
     tax_id_ruc: Optional[str] = Field(default=None, description="Tax ID (RUC) number")
-    tax_authority: Optional[str] = Field(
-        default=None, description="Tax authority name (e.g., SRI for Ecuador)"
+    # tax_authority: Optional[str] = Field(
+    #     default=None, description="Tax authority name (e.g., SRI for Ecuador)"
+    # )
+    fiscal_year: Optional[int] = Field(
+        default=None,
+        description=(
+            "Fiscal year of the document being extracted (e.g., 2021). "
+            "Each document covers a single year."
+        ),
     )
     annual_filings: List[AnnualTaxFiling] = Field(
-        description="Tax filing data for each fiscal year"
+        description=(
+            "Tax filing data for the document's fiscal year only. "
+            "Return exactly one entry matching the document year. "
+            "Do not include prior-year or comparative data."
+        )
     )
+
+    @model_validator(mode="after")
+    def normalize_to_document_fiscal_year(self) -> "IncomeTaxFilingsData":
+        """Keep only the filing entry that belongs to the document's fiscal year."""
+        if not self.annual_filings:
+            return self
+
+        target_year = _coerce_year(self.fiscal_year)
+
+        if target_year is None:
+            available_years = [
+                _coerce_year(entry.fiscal_year)
+                for entry in self.annual_filings
+                if _coerce_year(entry.fiscal_year) is not None
+            ]
+            if available_years:
+                target_year = max(available_years)
+
+        if target_year is not None:
+            self.fiscal_year = target_year
+            matched = [
+                entry
+                for entry in self.annual_filings
+                if _coerce_year(entry.fiscal_year) == target_year
+            ]
+            if matched:
+                self.annual_filings = matched[:1]
+
+        return self
 
 
 class AnnualCashFlow(BaseModel):
