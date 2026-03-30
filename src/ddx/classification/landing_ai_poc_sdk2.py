@@ -74,10 +74,19 @@ _EQUIPMENT_RESEARCH_ONLY_FIELDS = {
 }
 
 
+_PROJECT_SIMULATION_DERIVED_FIELDS = {"google_maps_link"}
+
+
 def _is_equipment_sheets_document_type(document_type: str) -> bool:
     return (
         document_type or ""
     ).strip().lower() == DocumentType.PROJECT_DATA_EQUIPMENT_SHEETS.value.strip().lower()
+
+
+def _is_project_simulation_report_document_type(document_type: str) -> bool:
+    return (
+        document_type or ""
+    ).strip().lower() == DocumentType.PROJECT_SIMULATION_REPORT.value.strip().lower()
 
 
 def _remove_schema_fields(schema: Any, field_names: set[str]) -> Any:
@@ -430,10 +439,10 @@ class ProjectSimulationReportData(BaseModel):
         default=None, description="Air temperature in Celsius"
     )
     total_pv_power_mwp: float = Field(description="Total photovoltaic power output in MWp")
-    monthly_statistics: Optional[List[MonthlyStatistic]] = Field(
-        default=None,
-        description="Monthly statistics for 12 months with PVOUT daily avg, monthly sum, and PR",
-    )
+    # monthly_statistics: Optional[List[MonthlyStatistic]] = Field(
+    #     default=None,
+    #     description="Monthly statistics for 12 months with PVOUT daily avg, monthly sum, and PR",
+    # )
     cumulative_degradation_pct: Optional[float] = Field(
         default=None,
         description="Cumulative Degradation Rate in percent, also known as Module Degradation Loss or rate of Degradation  - it can be present in years and we might need to divide to get the average. ",
@@ -446,6 +455,10 @@ class ProjectSimulationReportData(BaseModel):
     p95_value: Optional[float] = Field(
         default=None,
         description="P95 annual production probability value in MWh - production level with 95% probability of exceedance",
+    )
+    google_maps_link: Optional[str] = Field(
+        default=None,
+        description="Google Maps URL derived from geographical_coordinates. Computed in post-processing.",
     )
 
 
@@ -991,6 +1004,8 @@ def extract_fields(
     # overriding enriched values later in the pipeline.
     if _is_equipment_sheets_document_type(doc_type):
         schema = _remove_schema_fields(schema, _EQUIPMENT_RESEARCH_ONLY_FIELDS)
+    if _is_project_simulation_report_document_type(doc_type):
+        schema = _remove_schema_fields(schema, _PROJECT_SIMULATION_DERIVED_FIELDS)
 
     print(f"  [SDK] Extracting fields with model: {extract_model}")
     response = client.extract(

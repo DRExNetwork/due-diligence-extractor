@@ -103,10 +103,19 @@ _EQUIPMENT_RESEARCH_ONLY_FIELDS = {
 }
 
 
+_PROJECT_SIMULATION_DERIVED_FIELDS = {"google_maps_link"}
+
+
 def _is_equipment_sheets_document_type(document_type: str) -> bool:
     return (
         document_type or ""
     ).strip().lower() == DocumentType.PROJECT_DATA_EQUIPMENT_SHEETS.value.strip().lower()
+
+
+def _is_project_simulation_report_document_type(document_type: str) -> bool:
+    return (
+        document_type or ""
+    ).strip().lower() == DocumentType.PROJECT_SIMULATION_REPORT.value.strip().lower()
 
 
 def _remove_schema_fields(schema: Any, field_names: set[str]) -> Any:
@@ -1312,6 +1321,8 @@ async def _async_extract_fields(
     # that can conflict with enriched research values downstream.
     if _is_equipment_sheets_document_type(doc_type):
         schema = _remove_schema_fields(schema, _EQUIPMENT_RESEARCH_ONLY_FIELDS)
+    if _is_project_simulation_report_document_type(doc_type):
+        schema = _remove_schema_fields(schema, _PROJECT_SIMULATION_DERIVED_FIELDS)
 
     raw = await _async_extract(
         client, markdown_content, schema, model=model, rate_limiter=rate_limiter

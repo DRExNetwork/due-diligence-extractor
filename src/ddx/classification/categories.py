@@ -6,8 +6,10 @@ Supports two-level categorization: Top-level category → Document type
 """
 from __future__ import annotations
 
+import re
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Tuple, Type
+from urllib.parse import quote
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -850,6 +852,44 @@ def normalize_financial_statements_extraction(
     return normalized_extracted, normalized_metadata
 
 
+_COORD_NUMBER_RE = re.compile(r"[-+]?\d+(?:\.\d+)?")
+
+
+def _parse_coordinate_component(value: str, negative_directions: set) -> Optional[float]:
+    """Parse a single lat or lon component from various notations."""
+    cleaned = value.upper().replace("(", " ").replace(")", " ")
+    direction = next(
+        (d for d in ("N", "S", "E", "W") if d in cleaned),
+        None,
+    )
+    numbers = [abs(float(m)) for m in _COORD_NUMBER_RE.findall(cleaned)]
+    if not numbers:
+        return None
+    decimal = numbers[0]
+    if len(numbers) > 1:
+        decimal += numbers[1] / 60.0
+    if len(numbers) > 2:
+        decimal += numbers[2] / 3600.0
+    if direction is not None:
+        sign = -1.0 if direction in negative_directions else 1.0
+    else:
+        sign = -1.0 if cleaned.lstrip().startswith("-") else 1.0
+    return sign * decimal
+
+
+def _build_google_maps_link(raw_coordinates: Optional[str]) -> Optional[str]:
+    """Build a Google Maps URL from extracted geographical coordinates."""
+    if not raw_coordinates:
+        return None
+    parts = [p.strip() for p in raw_coordinates.split(",", 1)]
+    if len(parts) == 2:
+        lat = _parse_coordinate_component(parts[0], {"S"})
+        lng = _parse_coordinate_component(parts[1], {"W"})
+        if lat is not None and lng is not None:
+            return f"https://www.google.com/maps?q={lat:.8f},{lng:.8f}"
+    return f"https://www.google.com/maps/search/?api=1&query={quote(raw_coordinates)}"
+
+
 def normalize_extracted_document(
     document_type: DocumentType | str,
     extracted: Dict[str, Any],
@@ -865,6 +905,13 @@ def normalize_extracted_document(
 
     if doc_type_value == DocumentType.FINANCIAL_STATEMENTS.value:
         return normalize_financial_statements_extraction(extracted, extraction_metadata)
+
+    if doc_type_value == DocumentType.PROJECT_SIMULATION_REPORT.value:
+        normalized = dict(extracted)
+        normalized["google_maps_link"] = _build_google_maps_link(
+            normalized.get("geographical_coordinates")
+        )
+        return normalized, extraction_metadata
 
     return extracted, extraction_metadata
 
@@ -911,15 +958,6 @@ class AnnualCashFlow(BaseModel):
     fiscal_year: int = Field(description="Fiscal year for the cash flow statement")
     operating_cash_flow: Optional[float] = Field(
         default=None, description="Net cash from operating activities"
-    )
-    investing_cash_flow: Optional[float] = Field(
-        default=None, description="Net cash from investing activities"
-    )
-    financing_cash_flow: Optional[float] = Field(
-        default=None, description="Net cash from financing activities"
-    )
-    net_change_in_cash: Optional[float] = Field(
-        default=None, description="Net change in cash and cash equivalents"
     )
 
 
