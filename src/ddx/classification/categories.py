@@ -928,6 +928,73 @@ def normalize_income_tax_filings_extraction(
     return normalized_extracted, normalized_metadata
 
 
+def _select_cash_flow_year_rows(
+    annual_cash_flows: List[Any], fiscal_year: Optional[int]
+) -> Tuple[List[int], Optional[int]]:
+    """Pick the row indexes that belong to the document fiscal year."""
+    if not annual_cash_flows:
+        return [], _coerce_year(fiscal_year)
+
+    target_year = _coerce_year(fiscal_year)
+    if target_year is None:
+        available_years = [
+            year
+            for year in (_get_annual_filing_year(entry) for entry in annual_cash_flows)
+            if year is not None
+        ]
+        if available_years:
+            target_year = max(available_years)
+
+    if target_year is None:
+        return list(range(len(annual_cash_flows))), None
+
+    selected_indexes = [
+        index
+        for index, entry in enumerate(annual_cash_flows)
+        if _get_annual_filing_year(entry) == target_year
+    ]
+    if not selected_indexes:
+        return list(range(len(annual_cash_flows))), target_year
+
+    # Keep at most one entry for the target year
+    return selected_indexes[:1], target_year
+
+
+def normalize_cash_flow_statements_extraction(
+    extracted: Dict[str, Any],
+    extraction_metadata: Optional[Dict[str, Any]] = None,
+) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """Normalize extracted cash flow statements data to the document fiscal year."""
+    annual_cash_flows = extracted.get("annual_cash_flows")
+    if not isinstance(annual_cash_flows, list):
+        return extracted, extraction_metadata
+
+    selected_indexes, target_year = _select_cash_flow_year_rows(
+        annual_cash_flows,
+        extracted.get("fiscal_year"),
+    )
+
+    normalized_extracted = dict(extracted)
+    if target_year is not None:
+        normalized_extracted["fiscal_year"] = target_year
+
+    if selected_indexes and len(selected_indexes) != len(annual_cash_flows):
+        normalized_extracted["annual_cash_flows"] = [
+            annual_cash_flows[index] for index in selected_indexes
+        ]
+
+    normalized_metadata = extraction_metadata
+    if isinstance(extraction_metadata, dict):
+        normalized_metadata = dict(extraction_metadata)
+        metadata_rows = extraction_metadata.get("annual_cash_flows")
+        if isinstance(metadata_rows, list):
+            normalized_metadata["annual_cash_flows"] = [
+                metadata_rows[index] for index in selected_indexes if index < len(metadata_rows)
+            ]
+
+    return normalized_extracted, normalized_metadata
+
+
 _COORD_NUMBER_RE = re.compile(r"[-+]?\d+(?:\.\d+)?")
 
 
@@ -984,6 +1051,9 @@ def normalize_extracted_document(
 
     if doc_type_value == DocumentType.INCOME_TAX_FILINGS.value:
         return normalize_income_tax_filings_extraction(extracted, extraction_metadata)
+
+    if doc_type_value == DocumentType.CASH_FLOW_STATEMENTS.value:
+        return normalize_cash_flow_statements_extraction(extracted, extraction_metadata)
 
     if doc_type_value == DocumentType.PROJECT_SIMULATION_REPORT.value:
         normalized = dict(extracted)
@@ -1084,7 +1154,8 @@ class CashFlowStatementsData(BaseModel):
     """
     Schema for Cash Flow Statements (Section 1.4).
 
-    Note: Per requirements, this may only be provided for 1 year.
+    Extracts cash flow data for the document's fiscal year only.
+    Each document covers exactly one fiscal year.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -1093,9 +1164,49 @@ class CashFlowStatementsData(BaseModel):
         default=None, description="Company name as stated in the cash flow statements"
     )
     currency: Optional[str] = Field(default=None, description="Currency used (e.g., USD, EUR)")
-    annual_cash_flows: List[AnnualCashFlow] = Field(
-        description="Cash flow data for each fiscal year"
+    fiscal_year: Optional[int] = Field(
+        default=None,
+        description=(
+            "Fiscal year of the document being extracted (e.g., 2021). "
+            "Each document covers a single year."
+        ),
     )
+    annual_cash_flows: List[AnnualCashFlow] = Field(
+        description=(
+            "Cash flow data for the document's fiscal year only. "
+            "Return exactly one entry matching the document year. "
+            "Do not include prior-year or comparative data."
+        )
+    )
+
+    @model_validator(mode="after")
+    def normalize_to_document_fiscal_year(self) -> "CashFlowStatementsData":
+        """Keep only the cash flow entry that belongs to the document's fiscal year."""
+        if not self.annual_cash_flows:
+            return self
+
+        target_year = _coerce_year(self.fiscal_year)
+
+        if target_year is None:
+            available_years = [
+                _coerce_year(entry.fiscal_year)
+                for entry in self.annual_cash_flows
+                if _coerce_year(entry.fiscal_year) is not None
+            ]
+            if available_years:
+                target_year = max(available_years)
+
+        if target_year is not None:
+            self.fiscal_year = target_year
+            matched = [
+                entry
+                for entry in self.annual_cash_flows
+                if _coerce_year(entry.fiscal_year) == target_year
+            ]
+            if matched:
+                self.annual_cash_flows = matched[:1]
+
+        return self
 
 
 class TaxComplianceCertificateData(BaseModel):
