@@ -452,10 +452,10 @@ class ProjectSimulationReportData(BaseModel):
         default=None,
         description="P90 annual production probability value in MWh - production level with 90% probability of exceedance",
     )
-    p95_value: Optional[float] = Field(
-        default=None,
-        description="P95 annual production probability value in MWh - production level with 95% probability of exceedance",
-    )
+    # p95_value: Optional[float] = Field(
+    #     default=None,
+    #     description="P95 annual production probability value in MWh - production level with 95% probability of exceedance",
+    # )
     google_maps_link: Optional[str] = Field(
         default=None,
         description="Google Maps URL derived from geographical_coordinates. Computed in post-processing.",
