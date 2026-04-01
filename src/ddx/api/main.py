@@ -36,6 +36,9 @@ from ddx.api.models import (
     # Type 3
     ValidationCorrectionRequest,
     ValidationCorrectionResponse,
+    # Summary
+    SummaryGenerationRequest,
+    SummaryGenerationResponse,
     # Discovery
     HealthResponse,
     CategoryInfo,
@@ -45,6 +48,7 @@ from ddx.api.services import (
     bulk_ingest,
     targeted_completion,
     validation_correction,
+    generate_structured_summary,
 )
 from ddx.classification.extraction_api import (
     get_supported_categories,
@@ -419,7 +423,7 @@ async def endpoint_targeted_completion(req: TargetedCompletionRequest):
         "2. **Extract** only the specific variable(s) requested\n"
         "3. **Validate** against expected values if provided\n"
         "4. Return precise confidence and evidence for each field\n"
-        "5. Accept `document_type` in canonical, snake_case, kebab-case, or case-insensitive form\n\n"
+        "5. Accept `document_type` in canonical, snake_case, or case-insensitive form\n\n"
         "Precision correction path — user leads, AI provides supporting evidence."
     ),
 )
@@ -465,6 +469,58 @@ async def endpoint_validation_correction(req: ValidationCorrectionRequest):
         raise HTTPException(status_code=500, detail=str(e))
     except Exception as e:
         log.exception("Unexpected error in validation")
+        raise HTTPException(status_code=500, detail=f"Internal error: {type(e).__name__}: {str(e)}")
+
+
+# =============================================================================
+# Summary Generation Endpoint
+# =============================================================================
+
+
+@app.post(
+    "/api/v1/summary/generate",
+    response_model=SummaryGenerationResponse,
+    tags=["Summary"],
+    summary="Generate structured investment summary from NestJS payload",
+    description=(
+        "Receives a sectioned, mapped variable payload from NestJS and returns "
+        "a structured summary JSON for template rendering."
+    ),
+)
+async def endpoint_generate_summary(req: SummaryGenerationRequest):
+    """
+    Summary generation for Data Room investment overview.
+
+    **When to use:** NestJS has already mapped canonical project variables and
+    needs AI-generated narrative blocks in a structured response.
+
+    **AI Responsibility:**
+    - Generate section narratives from provided variables
+    - Preserve source values without fabricating new numeric facts
+    - Return structured JSON for HTML renderer mapping
+    """
+    try:
+        log.info(
+            "Summary generate: project=%s, sections=%d, template=%s",
+            req.project_id,
+            len(req.sections),
+            req.template_name,
+        )
+        result = await generate_structured_summary(req)
+        log.info(
+            "Summary generated: project=%s, mode=%s, sections=%d",
+            req.project_id,
+            result.generation_mode,
+            len(result.sections),
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        log.exception("Summary generation failed")
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        log.exception("Unexpected error in summary generation")
         raise HTTPException(status_code=500, detail=f"Internal error: {type(e).__name__}: {str(e)}")
 
 

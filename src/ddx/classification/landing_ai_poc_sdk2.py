@@ -32,15 +32,19 @@ from ddx.classification.categories import (
     DOCUMENT_TYPE_TO_TOP_LEVEL,
     ESHSESMSPoliciesData,
     QAQCCommissioningData,
-    HRManualCodeOfConductData,
+    IndustrialSafetyPlanData,
+    EnvironmentalLicenceEIAData,
+    EmergencyResponseSecurityPlanData,
+    SiteLegalStatusSummaryData,
+    LiensCertificateData,
+    NonOverlapProtectedAreasCertificateData,
+    HRPolicyCodeOfConductData,
     ElectricalUtilityFeasibilityReportData,
-    ConstructionPermitData,
-    EnvironmentalPermitData,
     LandUsePermitData,
-    InterconnectionAgreementData,
     # Company Experience
     ProjectAcceptanceCertificatesData,
     OAMContractData,
+    normalize_extracted_document,
 )
 
 from dotenv import load_dotenv
@@ -53,6 +57,66 @@ load_dotenv()
 LEGACY_API_MAX_PAGES = 50  # Legacy API supports up to 50 pages
 LEGACY_API_URL = "https://api.va.landing.ai/v1/tools/agentic-document-analysis"
 LEGACY_API_URL_EU = "https://api.va.eu-west-1.landing.ai/v1/tools/agentic-document-analysis"
+SUPPORTED_INPUT_EXTENSIONS = {".pdf", ".docx", ".png", ".jpeg", ".jpg"}
+
+
+_EQUIPMENT_RESEARCH_ONLY_FIELDS = {
+    "module_bloomberg",
+    "module_certifications",
+    "module_certificate_evidence",
+    "module_factory_test_date",
+    "module_test_evidence",
+    "inverter_bloomberg",
+    "inverter_certifications",
+    "inverter_certificate_evidence",
+    "inverter_anti_island_test_date",
+    "inverter_test_evidence",
+}
+
+
+_PROJECT_SIMULATION_DERIVED_FIELDS = {"google_maps_link"}
+
+
+def _is_equipment_sheets_document_type(document_type: str) -> bool:
+    return (
+        document_type or ""
+    ).strip().lower() == DocumentType.PROJECT_DATA_EQUIPMENT_SHEETS.value.strip().lower()
+
+
+def _is_project_simulation_report_document_type(document_type: str) -> bool:
+    return (
+        document_type or ""
+    ).strip().lower() == DocumentType.PROJECT_SIMULATION_REPORT.value.strip().lower()
+
+
+def _remove_schema_fields(schema: Any, field_names: set[str]) -> Any:
+    """Remove fields from a JSON schema represented as dict or JSON string."""
+    if isinstance(schema, str):
+        try:
+            parsed = json.loads(schema)
+        except Exception:
+            return schema
+
+        filtered = _remove_schema_fields(parsed, field_names)
+
+        try:
+            return json.dumps(filtered)
+        except Exception:
+            return schema
+
+    if not isinstance(schema, dict):
+        return schema
+
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        for field_name in field_names:
+            properties.pop(field_name, None)
+
+    required = schema.get("required")
+    if isinstance(required, list):
+        schema["required"] = [name for name in required if name not in field_names]
+
+    return schema
 
 
 # =============================================================================
@@ -357,7 +421,7 @@ class ProjectSimulationReportData(BaseModel):
     project_name: str = Field(description="Project name (e.g., 'Biogemar - Santa Elena')")
     geographical_coordinates: Optional[str] = Field(
         default=None,
-        description='Geographical coordinates (e.g., "-02°06\'03", -080°44\'47"")',
+        description="Project site coordinates as a single value containing both latitude and longitude. Latitude is the geographical Y coordinate and longitude is the geographical X coordinate. Extract both coordinates exactly as shown in the document. Prefer decimal degrees when available; otherwise preserve degrees, minutes, and seconds notation. Include the sign or hemisphere for each value. Example: '-2.1008, -79.9467' or '-02°06\\'03\", -080°44\\'47\"'.",
     )
     elevation_m: Optional[float] = Field(default=None, description="Elevation in meters")
     land_cover: Optional[str] = Field(
@@ -368,15 +432,17 @@ class ProjectSimulationReportData(BaseModel):
         description="Annual Specific Photovoltaic Power Output in kWh/kWp",
     )
     total_pv_energy_mwh: float = Field(description="Total photovoltaic energy output in MWh")
-    performance_ratio_pct: float = Field(description="Performance ratio in %")
+    performance_ratio_pct: float = Field(
+        description="Performance Ratio. Extract the exact value as it appears in the document. Do NOT convert or multiply."
+    )
     air_temperature_c: Optional[float] = Field(
         default=None, description="Air temperature in Celsius"
     )
     total_pv_power_mwp: float = Field(description="Total photovoltaic power output in MWp")
-    monthly_statistics: Optional[List[MonthlyStatistic]] = Field(
-        default=None,
-        description="Monthly statistics for 12 months with PVOUT daily avg, monthly sum, and PR",
-    )
+    # monthly_statistics: Optional[List[MonthlyStatistic]] = Field(
+    #     default=None,
+    #     description="Monthly statistics for 12 months with PVOUT daily avg, monthly sum, and PR",
+    # )
     cumulative_degradation_pct: Optional[float] = Field(
         default=None,
         description="Cumulative Degradation Rate in percent, also known as Module Degradation Loss or rate of Degradation  - it can be present in years and we might need to divide to get the average. ",
@@ -386,9 +452,68 @@ class ProjectSimulationReportData(BaseModel):
         default=None,
         description="P90 annual production probability value in MWh - production level with 90% probability of exceedance",
     )
-    p95_value: Optional[float] = Field(
+    # p95_value: Optional[float] = Field(
+    #     default=None,
+    #     description="P95 annual production probability value in MWh - production level with 95% probability of exceedance",
+    # )
+    google_maps_link: Optional[str] = Field(
         default=None,
-        description="P95 annual production probability value in MWh - production level with 95% probability of exceedance",
+        description="Google Maps URL derived from geographical_coordinates. Computed in post-processing.",
+    )
+
+
+class BloombergResearchEvidence(BaseModel):
+    """Web-research evidence from the latest Bloomberg list for the current year."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rating: Optional[str] = Field(
+        default=None,
+        description="Qualification/rating found in latest Bloomberg evidence for current year (for example AAA, AA, A)",
+    )
+    source: Optional[str] = Field(
+        default=None,
+        description="Source URL supporting the Bloomberg qualification/rating",
+    )
+
+
+class CertificateResearchEvidence(BaseModel):
+    """Web-research evidence for certificate name, source, and validity date."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    standard_code: str = Field(
+        description="Certificate standard code being researched (for example IEC 61215, IEC 62109)",
+    )
+    certificate_name: Optional[str] = Field(
+        default=None,
+        description="Certificate/report name found for the standard",
+    )
+    source: Optional[str] = Field(
+        default=None,
+        description="Source URL for the certificate evidence",
+    )
+    validity_date: Optional[str] = Field(
+        default=None,
+        description="Extracted certificate validity date in YYYY-MM-DD (null if not found)",
+    )
+
+
+class TestResearchEvidence(BaseModel):
+    """Web-research evidence for module/inverter test reports."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    test_name: str = Field(
+        description="Target test name from research query (for example Fabric report test or Anti-islanding test)",
+    )
+    source: Optional[str] = Field(
+        default=None,
+        description="Source URL for the test report evidence",
+    )
+    test_date: Optional[str] = Field(
+        default=None,
+        description="Extracted test date in YYYY-MM-DD (null if not found)",
     )
 
 
@@ -419,12 +544,17 @@ class ProjectDataMainEquipmentSheetsData(BaseModel):
         default=None,
         description="Module degradation rate for year 2 onwards in % - derived from linear degradation curve in datasheet",
     )
-    module_certifications: Optional[List[str]] = Field(
+    module_bloomberg: Optional[BloombergResearchEvidence] = Field(
         default=None,
-        description="Certifications (IEC 61215, IEC 61730, PID test, IEC 62716, IEC 61701)",
+        description="Latest/current-year Bloomberg research evidence for module_brand",
     )
-    module_factory_test_date: Optional[str] = Field(
-        default=None, description="Factory report test date if attached"
+    module_certificate_evidence: Optional[List[CertificateResearchEvidence]] = Field(
+        default=None,
+        description="Detailed module certificate evidence from latest research for IEC 61215, IEC 61730, IEC TS 62804 (PID), IEC 62716, and IEC 61701",
+    )
+    module_test_evidence: Optional[List[TestResearchEvidence]] = Field(
+        default=None,
+        description="Detailed module test evidence from latest research (Fabric report test)",
     )
 
     # Inverter
@@ -447,20 +577,17 @@ class ProjectDataMainEquipmentSheetsData(BaseModel):
     inverter_technical_warranty_years: Optional[int] = Field(
         default=None, description="Inverter warranty in years"
     )
-    inverter_certifications: Optional[List[str]] = Field(
-        default=None, description="Inverter certifications"
-    )
-    inverter_anti_island_test_date: Optional[str] = Field(
-        default=None, description="Anti-island test date if attached"
-    )
-
-    # Mounting Structure
-    structure_material: Optional[str] = Field(
+    inverter_bloomberg: Optional[BloombergResearchEvidence] = Field(
         default=None,
-        description="Material of the mounting structure (Anodized Aluminum, Hot deep Galvanized, etc.)",
+        description="Latest/current-year Bloomberg research evidence for inverter_brand",
     )
-    structure_warranty_years: Optional[int] = Field(
-        default=None, description="Structural warranty against corrosion in years"
+    inverter_certificate_evidence: Optional[List[CertificateResearchEvidence]] = Field(
+        default=None,
+        description="Detailed inverter certificate evidence from latest research for IEC 62109, IEC 61727, and IEC 61000",
+    )
+    inverter_test_evidence: Optional[List[TestResearchEvidence]] = Field(
+        default=None,
+        description="Detailed inverter test evidence from latest research (Anti-islanding test)",
     )
 
 
@@ -520,16 +647,54 @@ class ProjectBasicEngineeringData(BaseModel):
     annual_load_energy_kwh: Optional[float] = Field(
         default=None, description="Annual load consumed energy in kWh"
     )
-    project_visitation_report: Optional[ProjectVisitReportData] = Field(
-        default=None, description="Site visit information"
-    )
-    project_layout: Optional[ProjectLayoutData] = Field(
+    structure_type: Optional[str] = Field(
         default=None,
-        description="Layout and sizing information",
+        description=(
+            "Type of mounting structure (anodized aluminum structure, coplanar, "
+            "land mounting, carports mounting on a metal roof, etc.)"
+        ),
     )
-    grouding_system: Optional[GroundingSystemSingleLineDiagramData] = Field(
+    structure_material: Optional[str] = Field(
         default=None,
-        description="Grounding system information",
+        description="Material of the mounting structure (Anodized Aluminum, Hot deep Galvanized, etc.)",
+    )
+    structure_warranty_years: Optional[int] = Field(
+        default=None,
+        description="Structural warranty against corrosion in years",
+    )
+    # project_visitation_report: Optional[ProjectVisitReportData] = Field(
+    #     default=None, description="Site visit information"
+    # )
+
+    site_description: str = Field(description="Site description")
+    installation_area_m2: float = Field(description="Area for project installation in m²")
+    installation_location: str = Field(
+        description="Location of area available for installation (Rooftop, Land, Floating, etc.)"
+    )
+    # project_layout: Optional[ProjectLayoutData] = Field(
+    #     default=None,
+    #     description="Layout and sizing information",
+    # )
+
+    nominal_capacity_kw: float = Field(description="Nominal capacity in kW")
+    peak_capacity_kwp: float = Field(description="Peak capacity in kWp")
+    solar_modules_quantity: int = Field(description="Solar modules quantity")
+    solar_module_brand: str = Field(description="Solar module brand (e.g., JA Solar)")
+    solar_module_model: str = Field(description="Solar module model (e.g., JAM72S30-540/MR)")
+    inverter_brand: Optional[str] = Field(default=None, description="Inverter brand")
+    inverter_model: Optional[str] = Field(default=None, description="Inverter model")
+    inverters_quantity: int = Field(description="Inverters quantity")
+    strings_per_inverter: Optional[int] = Field(
+        default=None, description="Strings per inverter quantity"
+    )
+    module_orientation: Optional[str] = Field(default=None, description="Solar module orientation")
+    # grouding_system: Optional[GroundingSystemSingleLineDiagramData] = Field(
+    #     default=None,
+    #     description="Grounding system information",
+    # )
+    system_type: str = Field(description="Type of grounding system")
+    resistance_value_ohm: float = Field(
+        description="Ground resistance value in Ohms (Ω). Extract the exact decimal value, do not round."
     )
 
 
@@ -547,7 +712,7 @@ class CableEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     connection_type: str = Field(
-        description="Connection type (DC solar connection, AC load connection)"
+        description="Type of circuit or connection. Allowed values: 'DC load connection' or 'AC load connection'"
     )
     sizing: str = Field(description="Conductor sizing (e.g., '35 mm²' or '10 AWG')")
     cable_type: str = Field(description="Cable type (e.g., 'XLPE type')")
@@ -562,7 +727,7 @@ class CableSizingCalculationReportData(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     cable_entries: List[CableEntry] = Field(
-        description="Table of cable sizing for DC solar and AC load connections"
+        description="Table of cable sizing for DC load and AC load connections"
     )
 
 
@@ -604,15 +769,18 @@ PYDANTIC_MODELS: Dict[str, Type[BaseModel]] = {
     DocumentType.GROUNDING_SYSTEM_DIAGRAM.value: GroundingSystemSingleLineDiagramData,
     DocumentType.UNCATEGORIZED.value: UncategorizedDocumentData,
     # ESG (from categories.py)
-    DocumentType.ESHS_ESMS_POLICIES.value: ESHSESMSPoliciesData,
+    DocumentType.ENVIRONMENTAL_AND_SOCIAL_MANAGEMENT_PLAN.value: ESHSESMSPoliciesData,
     DocumentType.QAQC_COMMISSIONING_PROCEDURES.value: QAQCCommissioningData,
-    DocumentType.HR_MANUAL_CODE_OF_CONDUCT.value: HRManualCodeOfConductData,
+    DocumentType.INDUSTRIAL_SAFETY_PLAN.value: IndustrialSafetyPlanData,
+    DocumentType.ENVIRONMENTAL_LICENCE_EIA.value: EnvironmentalLicenceEIAData,
+    DocumentType.EMERGENCY_RESPONSE_SECURITY_PLAN.value: EmergencyResponseSecurityPlanData,
+    DocumentType.SITE_LEGAL_STATUS_SUMMARY.value: SiteLegalStatusSummaryData,
+    DocumentType.LIENS_CERTIFICATE.value: LiensCertificateData,
+    DocumentType.NON_OVERLAP_WITH_PROTECTED_AREAS_CERTIFICATE.value: NonOverlapProtectedAreasCertificateData,
+    DocumentType.HR_POLICY_CODE_OF_CONDUCT.value: HRPolicyCodeOfConductData,
+    DocumentType.LAND_USE_PERMIT.value: LandUsePermitData,
     # Permits (from categories.py)
     DocumentType.ELECTRICAL_UTILITY_FEASIBILITY_REPORT.value: ElectricalUtilityFeasibilityReportData,
-    DocumentType.CONSTRUCTION_PERMIT.value: ConstructionPermitData,
-    DocumentType.ENVIRONMENTAL_PERMIT.value: EnvironmentalPermitData,
-    DocumentType.LAND_USE_PERMIT.value: LandUsePermitData,
-    DocumentType.INTERCONNECTION_AGREEMENT.value: InterconnectionAgreementData,
     # Company Experience (from categories.py)
     DocumentType.PROJECT_ACCEPTANCE_CERTIFICATES.value: ProjectAcceptanceCertificatesData,
     DocumentType.OAM_CONTRACTS.value: OAMContractData,
@@ -831,6 +999,14 @@ def extract_fields(
     # Convert Pydantic model to JSON schema
     schema = pydantic_to_json_schema(model_cls)
 
+    # Equipment research-only fields are filled by research enrichment.
+    # Excluding them from SDK extraction avoids partial/null extraction values
+    # overriding enriched values later in the pipeline.
+    if _is_equipment_sheets_document_type(doc_type):
+        schema = _remove_schema_fields(schema, _EQUIPMENT_RESEARCH_ONLY_FIELDS)
+    if _is_project_simulation_report_document_type(doc_type):
+        schema = _remove_schema_fields(schema, _PROJECT_SIMULATION_DERIVED_FIELDS)
+
     print(f"  [SDK] Extracting fields with model: {extract_model}")
     response = client.extract(
         schema=schema,
@@ -861,6 +1037,13 @@ def extract_fields(
         "extraction_metadata": getattr(response, "extraction_metadata", None),
         "metadata": getattr(response, "metadata", None),
     }
+
+    extracted, normalized_metadata = normalize_extracted_document(
+        doc_type,
+        extracted,
+        raw.get("extraction_metadata"),
+    )
+    raw["extraction_metadata"] = normalized_metadata
 
     extracted_log = json.dumps(extracted, ensure_ascii=False, default=str)
     if len(extracted_log) > 3000:
@@ -978,18 +1161,29 @@ def get_category_output_dirs(
 
 
 def _iter_inputs(pdf: Optional[str], pdf_dir: Optional[str]) -> List[Path]:
-    """Iterate over input PDFs."""
+    """Iterate over input files (pdf, docx, png, jpeg)."""
     if pdf:
         p = Path(pdf).expanduser().resolve()
         if not p.exists():
             raise FileNotFoundError(f"Not found: {p}")
+        if p.suffix.lower() not in SUPPORTED_INPUT_EXTENSIONS:
+            raise ValueError(
+                "Unsupported file type. Supported extensions: "
+                f"{sorted(SUPPORTED_INPUT_EXTENSIONS)}"
+            )
         return [p]
 
     if pdf_dir:
         d = Path(pdf_dir).expanduser().resolve()
         if not d.exists():
             raise FileNotFoundError(f"Not found: {d}")
-        return sorted([p for p in d.rglob("*.pdf") if p.is_file()])
+        return sorted(
+            [
+                p
+                for p in d.rglob("*")
+                if p.is_file() and p.suffix.lower() in SUPPORTED_INPUT_EXTENSIONS
+            ]
+        )
 
     raise ValueError("Provide either --pdf or --pdf-dir")
 
@@ -1321,7 +1515,7 @@ def main() -> int:
         "--pdf-dir",
         type=str,
         default=None,
-        help="Directory to scan recursively for PDFs",
+        help="Directory to scan recursively for documents/images (.pdf, .docx, .png, .jpeg)",
     )
     ap.add_argument(
         "--out",
@@ -1414,7 +1608,7 @@ def main() -> int:
     print("=" * 60)
     print("Landing.ai Pipeline (Smart API Routing)")
     print("=" * 60)
-    print(f"PDFs to process: {len(pdfs)}")
+    print(f"Files to process: {len(pdfs)}")
     if top_level_category:
         print(f"Top-level category: {top_level_category.value}")
         available_types = get_document_types_for_category(top_level_category)
@@ -1494,12 +1688,12 @@ def main() -> int:
     print("\n" + "=" * 60)
     print("PROCESSING SUMMARY")
     print("=" * 60)
-    print(f"Total PDFs found: {len(pdfs)}")
+    print(f"Total files found: {len(pdfs)}")
     if top_level_category:
         print(f"Top-level category: {top_level_category.value}")
-    print(f"PDFs skipped (already processed): {skipped_count}")
-    print(f"PDFs processed successfully: {sum(category_counts.values())}")
-    print(f"PDFs with errors: {error_count}")
+    print(f"Files skipped (already processed): {skipped_count}")
+    print(f"Files processed successfully: {sum(category_counts.values())}")
+    print(f"Files with errors: {error_count}")
 
     print(f"\nAPI Usage Breakdown:")
     print(f"  Parse:")

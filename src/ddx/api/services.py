@@ -8,6 +8,7 @@ and transforms results into API response models.
 from __future__ import annotations
 
 import asyncio
+from datetime import datetime, timezone
 import json
 import logging
 import os
@@ -43,6 +44,9 @@ from ddx.classification.extraction_api import (
     PYDANTIC_MODELS,
 )
 from ddx.classification.categories import TopLevelCategory
+from ddx.classification.landing_ai_poc_sdk import should_disable_cross_document_validation
+from ddx.classification.categories import DocumentType
+from ddx.api.equipment_research import run_equipment_research_async
 
 from ddx.api.models import (
     BulkIngestionRequest,
@@ -55,9 +59,16 @@ from ddx.api.models import (
     ValidationCorrectionResponse,
     FieldValidationResult,
     DocumentProcessingError,
+    SummaryGenerationRequest,
+    SummaryGenerationResponse,
+    SummarySectionOutput,
 )
 
 log = logging.getLogger("ddx.api.services")
+
+
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 def _truncate_for_log(value: Any, max_len: int = 3000) -> str:
@@ -71,6 +82,32 @@ def _truncate_for_log(value: Any, max_len: int = 3000) -> str:
         return serialized
 
     return f"{serialized[:max_len]}...(truncated)"
+
+
+def _persist_summary_trace(
+    request_payload: Dict[str, Any],
+    response_payload: Dict[str, Any],
+    *,
+    status: str,
+    error: Optional[str] = None,
+) -> None:
+    """Persist summary request/response to JSONL for debugging and auditability."""
+    trace_path = Path(os.getenv("SUMMARY_TRACE_PATH", "logs/summary-generation-trace.jsonl"))
+    if not trace_path.is_absolute():
+        trace_path = Path.cwd() / trace_path
+
+    trace_path.parent.mkdir(parents=True, exist_ok=True)
+
+    record: Dict[str, Any] = {
+        "timestamp": _utc_now_iso(),
+        "status": status,
+        "error": error,
+        "request": request_payload,
+        "response": response_payload,
+    }
+
+    with trace_path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
 
 
 def _slug_document_type(value: str) -> str:
@@ -93,6 +130,518 @@ def _normalize_document_type(document_type: str) -> str:
         f"Unknown document type: '{document_type}'. "
         f"Valid types: {sorted(PYDANTIC_MODELS.keys())}"
     )
+
+
+_RESEARCH_FIELDS: List[str] = [
+    "module_bloomberg",
+    "module_certifications",
+    "module_certificate_evidence",
+    "module_factory_test_date",
+    "module_test_evidence",
+    "inverter_bloomberg",
+    "inverter_certifications",
+    "inverter_certificate_evidence",
+    "inverter_anti_island_test_date",
+    "inverter_test_evidence",
+]
+
+_UNCATEGORIZED_DOCUMENT_TYPE = "Uncategorized Document"
+
+
+def _is_equipment_sheets_document_type(document_type: Optional[str]) -> bool:
+    if not document_type:
+        return False
+    return _slug_document_type(document_type) == _slug_document_type(
+        DocumentType.PROJECT_DATA_EQUIPMENT_SHEETS.value
+    )
+
+
+def _clean_brand(value: Any) -> Optional[str]:
+    if isinstance(value, str):
+        cleaned = value.strip()
+        return cleaned or None
+    return None
+
+
+def _extract_equipment_brands(
+    extracted_data: Dict[str, Any],
+) -> Tuple[Optional[str], Optional[str]]:
+    module_brand = _clean_brand(extracted_data.get("module_brand"))
+    inverter_brand = _clean_brand(extracted_data.get("inverter_brand"))
+    return module_brand, inverter_brand
+
+
+def _has_meaningful_value(value: Any) -> bool:
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, list):
+        return len(value) > 0
+    if isinstance(value, dict):
+        return any(_has_meaningful_value(v) for v in value.values())
+    return True
+
+
+def _merge_research_into_extracted_data(
+    extracted_data: Dict[str, Any], research_payload: Dict[str, Any]
+) -> None:
+    for field in _RESEARCH_FIELDS:
+        if field not in research_payload:
+            continue
+        incoming = research_payload.get(field)
+        existing = extracted_data.get(field)
+        if _has_meaningful_value(incoming) or field not in extracted_data or existing is None:
+            extracted_data[field] = incoming
+
+
+def _extract_source_hints_from_result(result: Any) -> Tuple[Optional[str], Optional[str]]:
+    source_filename = getattr(result, "file_name", None)
+    source_file = getattr(result, "file_path", None) or source_filename
+    return source_file, source_filename
+
+
+async def _resolve_research_payload_for_extracted_data(
+    extracted_data: Dict[str, Any],
+    cache: Dict[Tuple[str, str], Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    module_brand, inverter_brand = _extract_equipment_brands(extracted_data)
+    if not (module_brand or inverter_brand):
+        return None
+
+    cache_key = (module_brand or "", inverter_brand or "")
+    print("this is cache key", cache_key)
+    print("this is cache", cache)
+    if cache_key not in cache:
+        cache[cache_key] = await run_equipment_research_async(module_brand, inverter_brand)
+
+    return cache[cache_key]
+
+
+def _build_research_validated_field_with_source(
+    field_name: str,
+    value: Any,
+    source_file: Optional[str],
+    source_filename: Optional[str],
+) -> Dict[str, Any]:
+    confidence = 0.8 if _has_meaningful_value(value) else 0.0
+    resolved_source_filename = source_filename or ""
+    resolved_source_file = source_file or resolved_source_filename
+
+    return {
+        "field_name": field_name,
+        "value": value,
+        "source_file": resolved_source_file,
+        "source_filename": resolved_source_filename,
+        "extracted_text": "",
+        "locations": [],
+        "confidence_score": confidence,
+        "justification": "Latest/current-year web research enrichment for equipment sheets.",
+        "alternatives": [],
+        "flags": [],
+    }
+
+
+def _enrich_serialized_validated_payload(
+    validated_payload: Dict[str, Any],
+    research_payload: Dict[str, Any],
+    source_file: Optional[str] = None,
+    source_filename: Optional[str] = None,
+) -> None:
+    validated_fields = validated_payload.get("validated_fields")
+    can_attach_validated_fields = isinstance(validated_fields, dict) and bool(source_filename)
+
+    if can_attach_validated_fields:
+        for field in _RESEARCH_FIELDS:
+            if field in research_payload:
+                validated_fields[field] = _build_research_validated_field_with_source(
+                    field,
+                    research_payload.get(field),
+                    source_file,
+                    source_filename,
+                )
+
+    validated_payload["research_data"] = {
+        field: research_payload.get(field) for field in _RESEARCH_FIELDS
+    }
+
+
+async def _enrich_bulk_equipment_research(
+    processed: List[BulkDocumentResult],
+    validated: Optional[Dict[str, Any]],
+) -> None:
+    cache: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    validated_research_by_type: Dict[str, Dict[str, Any]] = {}
+
+    for doc in processed:
+        if not doc.success or not _is_equipment_sheets_document_type(doc.document_type):
+            continue
+
+        extracted_data = doc.extracted_data or {}
+        research_payload = await _resolve_research_payload_for_extracted_data(extracted_data, cache)
+        if not research_payload:
+            continue
+
+        _merge_research_into_extracted_data(extracted_data, research_payload)
+        doc.extracted_data = extracted_data
+
+        if doc.document_type not in validated_research_by_type:
+            validated_research_by_type[doc.document_type] = {
+                "payload": research_payload,
+                "source_file": doc.s3_path or doc.file_name,
+                "source_filename": doc.file_name,
+            }
+
+    if not validated:
+        return
+
+    for doc_type, enrich_payload in validated_research_by_type.items():
+        validated_payload = validated.get(doc_type)
+        if isinstance(validated_payload, dict):
+            _enrich_serialized_validated_payload(
+                validated_payload,
+                enrich_payload["payload"],
+                source_file=enrich_payload.get("source_file"),
+                source_filename=enrich_payload.get("source_filename"),
+            )
+
+
+async def _enrich_targeted_equipment_research(
+    document_type: str,
+    results_list: list,
+) -> Optional[Dict[str, Any]]:
+    if not _is_equipment_sheets_document_type(document_type):
+        return None
+
+    cache: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    first_research_payload: Optional[Dict[str, Any]] = None
+    first_source_file: Optional[str] = None
+    first_source_filename: Optional[str] = None
+
+    for result in results_list:
+        if not getattr(result, "success", False):
+            continue
+
+        extracted_data = getattr(result, "extracted_data", None)
+        if not isinstance(extracted_data, dict):
+            continue
+
+        research_payload = await _resolve_research_payload_for_extracted_data(extracted_data, cache)
+        print("this is research payload", research_payload)
+        if not research_payload:
+            continue
+
+        _merge_research_into_extracted_data(extracted_data, research_payload)
+
+        if first_research_payload is None:
+            first_research_payload = research_payload
+            first_source_file, first_source_filename = _extract_source_hints_from_result(result)
+
+    if first_research_payload is None:
+        return None
+
+    return {
+        "payload": first_research_payload,
+        "source_file": first_source_file,
+        "source_filename": first_source_filename,
+    }
+
+
+# =============================================================================
+# Summary Generation Service
+# =============================================================================
+
+
+def _safe_str(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        return json.dumps(value, ensure_ascii=False)
+    return str(value)
+
+
+def _build_summary_system_prompt() -> str:
+    return (
+        "You are an investment analyst generating a structured project summary. "
+        "Use only values provided in the input payload. "
+        "Do not invent numbers, dates, names, percentages, capacities "
+        "Return valid JSON matching the requested schema."
+    )
+
+
+def _build_summary_user_payload(req: SummaryGenerationRequest) -> Dict[str, Any]:
+    return {
+        "schema_version": "summary_v1",
+        "project_id": req.project_id,
+        "project_name": req.project_name,
+        "language": req.language,
+        "template_name": req.template_name,
+        "sections": [section.model_dump() for section in req.sections],
+        "missing_fields": req.missing_fields,
+        "style_reference_markdown": req.style_reference_markdown,
+    }
+
+
+def _build_summary_response_schema() -> Dict[str, Any]:
+    return {
+        "name": "investment_summary_structured_response",
+        "schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "sections": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "id": {"type": "string"},
+                            "title": {"type": "string"},
+                            "order": {"type": "integer"},
+                            "narrative_intro": {"type": "string"},
+                            "narrative_closing": {"type": "string"},
+                            "table_rows": {
+                                "type": "array",
+                                "items": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                },
+                            },
+                            "kpis": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "additionalProperties": False,
+                                    "properties": {
+                                        "label": {"type": "string"},
+                                        "value": {"type": "string"},
+                                        "available": {"type": "boolean"},
+                                    },
+                                    "required": ["label", "value", "available"],
+                                },
+                            },
+                            "bullets": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "source_fields": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                        },
+                        "required": [
+                            "id",
+                            "title",
+                            "order",
+                            "narrative_intro",
+                            "narrative_closing",
+                            "table_rows",
+                            "kpis",
+                            "bullets",
+                            "source_fields",
+                        ],
+                    },
+                },
+                "final_summary": {"type": "string"},
+            },
+            "required": ["sections", "final_summary"],
+        },
+        "strict": True,
+    }
+
+
+def _build_fallback_summary(
+    req: SummaryGenerationRequest, reason: str
+) -> SummaryGenerationResponse:
+    sections: List[SummarySectionOutput] = []
+    total_input_fields = 0
+    total_non_empty_values = 0
+
+    for section in req.sections:
+        table_rows: List[List[str]] = []
+        source_fields: List[str] = []
+
+        for variable in section.variables:
+            total_input_fields += 1
+            value_str = _safe_str(variable.value)
+            if value_str.strip():
+                total_non_empty_values += 1
+
+            table_rows.append([variable.label, value_str or "N/A"])
+            source_fields.append(variable.field_name)
+
+        sections.append(
+            SummarySectionOutput(
+                id=section.id,
+                title=section.title,
+                order=section.order,
+                narrative_intro=(
+                    f"This section summarizes {section.title.lower()} based on mapped project "
+                    "variables received from NestJS."
+                ),
+                narrative_closing="Further narrative enrichment can be generated by the configured LLM.",
+                table_rows=table_rows,
+                kpis=[],
+                bullets=[],
+                source_fields=source_fields,
+            )
+        )
+
+    completeness = 0.0
+    if total_input_fields > 0:
+        completeness = round((total_non_empty_values / total_input_fields) * 100, 2)
+
+    return SummaryGenerationResponse(
+        generated_at=_utc_now_iso(),
+        project_id=req.project_id,
+        project_name=req.project_name,
+        language=req.language,
+        model_version="fallback-rule-based",
+        sections=sorted(sections, key=lambda s: s.order),
+        final_summary=(
+            "Structured summary generated from mapped project variables. "
+            "Narrative content uses deterministic fallback mode."
+        ),
+        data_gaps=req.missing_fields,
+        quality_checks={
+            "required_sections_present": len(sections) == len(req.sections),
+            "input_fields_total": total_input_fields,
+            "input_fields_non_empty": total_non_empty_values,
+            "completeness_pct": completeness,
+            "fallback_reason": reason,
+        },
+        generation_mode="fallback",
+    )
+
+
+def _generate_summary_with_openai(req: SummaryGenerationRequest) -> SummaryGenerationResponse:
+    from openai import OpenAI
+
+    model_name = req.model or os.getenv("SUMMARY_MODEL") or os.getenv("LLM_MODEL")
+    model_name = model_name or "gpt-4.1-2025-04-14"
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is not configured")
+
+    client = OpenAI(api_key=api_key)
+
+    system_prompt = _build_summary_system_prompt()
+    payload = _build_summary_user_payload(req)
+
+    completion = client.chat.completions.create(
+        model=model_name,
+        messages=[
+            {"role": "system", "content": system_prompt},
+            {
+                "role": "user",
+                "content": (
+                    "Generate structured investment summary JSON using this payload:\n"
+                    f"{json.dumps(payload, ensure_ascii=False)}"
+                ),
+            },
+        ],
+        response_format={
+            "type": "json_schema",
+            "json_schema": _build_summary_response_schema(),
+        },
+    )
+
+    content = completion.choices[0].message.content if completion.choices else None
+    if not content:
+        raise RuntimeError("LLM returned empty response for summary generation")
+
+    parsed = json.loads(content)
+
+    output_sections: List[SummarySectionOutput] = []
+    for section in parsed.get("sections", []):
+        output_sections.append(
+            SummarySectionOutput(
+                id=section.get("id", ""),
+                title=section.get("title", ""),
+                order=section.get("order", 0),
+                narrative_intro=section.get("narrative_intro", ""),
+                narrative_closing=section.get("narrative_closing"),
+                table_rows=section.get("table_rows", []),
+                kpis=section.get("kpis", []),
+                bullets=section.get("bullets", []),
+                source_fields=section.get("source_fields", []),
+            )
+        )
+
+    total_fields = sum(len(section.variables) for section in req.sections)
+    total_non_empty = sum(
+        1
+        for section in req.sections
+        for variable in section.variables
+        if _safe_str(variable.value).strip()
+    )
+    completeness = round((total_non_empty / total_fields) * 100, 2) if total_fields > 0 else 0.0
+
+    return SummaryGenerationResponse(
+        generated_at=_utc_now_iso(),
+        project_id=req.project_id,
+        project_name=req.project_name,
+        language=req.language,
+        model_version=getattr(completion, "model", model_name),
+        sections=sorted(output_sections, key=lambda s: s.order),
+        final_summary=parsed.get("final_summary", ""),
+        data_gaps=req.missing_fields,
+        quality_checks={
+            "required_sections_present": len(output_sections) > 0,
+            "input_fields_total": total_fields,
+            "input_fields_non_empty": total_non_empty,
+            "completeness_pct": completeness,
+        },
+        generation_mode="llm",
+    )
+
+
+async def generate_structured_summary(req: SummaryGenerationRequest) -> SummaryGenerationResponse:
+    """
+    Summary layer endpoint service.
+
+    Receives structured project variables from NestJS and returns a structured
+    summary JSON produced by the AI module.
+    """
+    request_payload = _build_summary_user_payload(req)
+
+    log.info(
+        "Summary generation request: project=%s, sections=%d, template=%s",
+        req.project_id,
+        len(req.sections),
+        req.template_name,
+    )
+    log.debug("Summary payload: %s", _truncate_for_log(request_payload))
+
+    try:
+        result = await asyncio.to_thread(_generate_summary_with_openai, req)
+        _persist_summary_trace(
+            request_payload,
+            result.model_dump(),
+            status="success",
+        )
+        log.info(
+            "Summary generation done: project=%s, mode=%s, sections=%d",
+            req.project_id,
+            result.generation_mode,
+            len(result.sections),
+        )
+        return result
+    except Exception as e:
+        log.warning(
+            "Summary generation falling back to deterministic mode for project=%s: %s",
+            req.project_id,
+            e,
+        )
+        fallback_result = _build_fallback_summary(req, str(e))
+        _persist_summary_trace(
+            request_payload,
+            fallback_result.model_dump(),
+            status="fallback",
+            error=str(e),
+        )
+        return fallback_result
 
 
 # =============================================================================
@@ -311,14 +860,14 @@ def _collect_non_uncategorized(
 ) -> None:
     """Collect successful, non-uncategorized results from a batch."""
     for r in batch.results:
-        if r.success and r.document_type != "Uncategorized Document":
+        if r.success and r.document_type != _UNCATEGORIZED_DOCUMENT_TYPE:
             all_results.append(r)
 
     if not batch.validated_results:
         return
 
     for dt, vr in batch.validated_results.items():
-        if dt != "Uncategorized Document":
+        if dt != _UNCATEGORIZED_DOCUMENT_TYPE:
             all_validated[dt] = vr
 
 
@@ -327,7 +876,7 @@ def _deduplicate_results(results: List[DocumentResult]) -> Dict[str, DocumentRes
     best: Dict[str, DocumentResult] = {}
     for r in results:
         existing = best.get(r.file_name)
-        if existing is None or r.document_type != "Uncategorized Document":
+        if existing is None or r.document_type != _UNCATEGORIZED_DOCUMENT_TYPE:
             best[r.file_name] = r
     return best
 
@@ -345,7 +894,7 @@ def _fill_missing_files(
         best[local_path.name] = DocumentResult(
             file_name=local_path.name,
             file_path=str(local_path),
-            document_type="Uncategorized Document",
+            document_type=_UNCATEGORIZED_DOCUMENT_TYPE,
             top_level_category="unknown",
             extracted_data={},
             success=True,
@@ -373,6 +922,8 @@ async def bulk_ingest(req: BulkIngestionRequest) -> BulkIngestionResponse:
             processed, validated = await _process_all_categories(
                 resolved.file_paths, req, path_mapping
             )
+
+        await _enrich_bulk_equipment_research(processed, validated)
 
         return _assemble_bulk_response(req, processed, validated)
 
@@ -475,7 +1026,15 @@ async def targeted_completion(req: TargetedCompletionRequest) -> TargetedComplet
         if resolved.is_empty:
             return _build_empty_targeted_response(req, top_level_str, doc_type)
 
-        if not req.enable_validation:
+        enable_validation = True
+        if should_disable_cross_document_validation(doc_type):
+            log.info(
+                "Targeted completion bypassing validation for doc_type='%s' because it "
+                "contains additive repeated variables",
+                doc_type,
+            )
+            enable_validation = False
+        elif not req.enable_validation:
             log.info(
                 "Targeted completion received enable_validation=False; enforcing validation for Type 2"
             )
@@ -488,12 +1047,24 @@ async def targeted_completion(req: TargetedCompletionRequest) -> TargetedComplet
             extract_model=req.config.extract_model,
             max_concurrent=req.max_concurrent,
             rate_limit=req.config.rate_limit,
-            enable_validation=True,
+            enable_validation=enable_validation,
             validation_model=req.validation_model,
         )
 
+        research_bundle = await _enrich_targeted_equipment_research(doc_type, results_list)
+
         return _assemble_targeted_response(
-            req, top_level_str, doc_type, results_list, validated_result, resolved
+            req,
+            top_level_str,
+            doc_type,
+            results_list,
+            validated_result,
+            resolved,
+            research_payload=research_bundle["payload"] if research_bundle else None,
+            research_source_file=research_bundle.get("source_file") if research_bundle else None,
+            research_source_filename=(
+                research_bundle.get("source_filename") if research_bundle else None
+            ),
         )
 
     finally:
@@ -523,6 +1094,9 @@ def _assemble_targeted_response(
     results_list: list,
     validated_result: Any,
     resolved: ResolvedFiles,
+    research_payload: Optional[Dict[str, Any]] = None,
+    research_source_file: Optional[str] = None,
+    research_source_filename: Optional[str] = None,
 ) -> TargetedCompletionResponse:
     """Convert extraction results into targeted response."""
     individual = [
@@ -541,6 +1115,13 @@ def _assemble_targeted_response(
     ]
 
     consolidated = _serialize_targeted_validated_result(validated_result)
+    if consolidated and research_payload:
+        _enrich_serialized_validated_payload(
+            consolidated,
+            research_payload,
+            source_file=research_source_file,
+            source_filename=research_source_filename,
+        )
 
     extracted_variables = {
         r.file_name: r.extracted_data for r in individual if r.success and r.extracted_data

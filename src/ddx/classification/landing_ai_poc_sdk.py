@@ -23,6 +23,44 @@ from ddx.classification.categories import (
     DOCUMENT_TYPE_TO_TOP_LEVEL,
 )
 
+
+VALIDATION_BYPASS_FIELDS = frozenset(
+    {
+        "year",
+        "monthly_consumption",
+        "financial_ratios",
+        "annual_filings",
+        "annual_cash_flows",
+    }
+)
+
+VALIDATION_BYPASS_DOCUMENT_TYPES = frozenset(
+    {
+        DocumentType.ENERGY_CONSUMPTION_BILLS.value,
+        DocumentType.FINANCIAL_STATEMENTS.value,
+        DocumentType.INCOME_TAX_FILINGS.value,
+        DocumentType.CASH_FLOW_STATEMENTS.value,
+    }
+)
+
+
+def should_disable_cross_document_validation(
+    document_type: DocumentType | str,
+    field_names: Optional[List[str]] = None,
+) -> bool:
+    """Return True for additive time-series payloads that must keep every period."""
+    doc_type_value = (
+        document_type.value if isinstance(document_type, DocumentType) else document_type
+    )
+    if doc_type_value in VALIDATION_BYPASS_DOCUMENT_TYPES:
+        return True
+
+    if not field_names:
+        return False
+
+    return any(field_name in VALIDATION_BYPASS_FIELDS for field_name in field_names)
+
+
 # =============================================================================
 # SDK Client Setup
 # =============================================================================
@@ -123,10 +161,6 @@ class ProjectSimulationReportData(BaseModel):
         default=None, description="Air temperature in Celsius"
     )
     total_pv_power_mwp: float = Field(description="Total photovoltaic power output in MWp")
-    monthly_statistics: Optional[List[MonthlyStatistic]] = Field(
-        default=None,
-        description="Monthly statistics for 12 months with PVOUT daily avg, monthly sum, and PR",
-    )
     cumulative_degradation_pct: Optional[float] = Field(
         default=None,
         description="Cumulative Degradation Rate in percent, also known as Module Degradation Loss or rate of Degradation  - it can be present in years and we might need to divide to get the average. ",
@@ -136,9 +170,13 @@ class ProjectSimulationReportData(BaseModel):
         default=None,
         description="P90 annual production probability value in MWh - production level with 90% probability of exceedance",
     )
-    p95_value: Optional[float] = Field(
+    # p95_value: Optional[float] = Field(
+    #     default=None,
+    #     description="P95 annual production probability value in MWh - production level with 95% probability of exceedance",
+    # )
+    google_maps_link: Optional[str] = Field(
         default=None,
-        description="P95 annual production probability value in MWh - production level with 95% probability of exceedance",
+        description="Google Maps URL derived from geographical_coordinates. Computed in post-processing.",
     )
 
 

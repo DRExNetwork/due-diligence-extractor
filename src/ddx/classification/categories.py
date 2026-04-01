@@ -6,15 +6,29 @@ Supports two-level categorization: Top-level category → Document type
 """
 from __future__ import annotations
 
+import re
 from enum import Enum
-from typing import List, Optional, Type
+from typing import Any, Dict, List, Literal, Optional, Tuple, Type
+from urllib.parse import quote
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 # =============================================================================
 # Top-Level Categories (Level 1)
 # =============================================================================
+DocumentLanguageAnswer = Literal["Spanish", "English", "Other"]
+YesNoAnswer = Literal["Yes", "No"]
+YES_NO_RESPONSE_INSTRUCTION = (
+    "Return exactly one of: Yes, No. " "Do not return true/false or any other variant."
+)
+SOURCE_LANGUAGE_RESPONSE_INSTRUCTION = (
+    "Return the response in the language indicated by document_language. "
+    "If document_language is Spanish, answer entirely in Spanish. "
+    "If document_language is English, answer entirely in English. "
+    "Do not answer in English when document_language is Spanish. "
+    "Do not translate unless document_language explicitly requires it."
+)
 
 
 class TopLevelCategory(str, Enum):
@@ -22,6 +36,7 @@ class TopLevelCategory(str, Enum):
 
     COMPANY_INFORMATION = "Company Information"
     COMPANY_FINANCIALS = "Company Financials"
+    FINANCIAL = "Financial"
     COMPANY_EXPERIENCE = "Company Experience"
     TECHNICAL = "Technical"
     ESG = "ESG"
@@ -66,16 +81,19 @@ class DocumentType(str, Enum):
     GROUNDING_SYSTEM_DIAGRAM = "Grounding System"
 
     # ESG Documents
-    ESHS_ESMS_POLICIES = "ESHS / ESMS Policies"
+    ENVIRONMENTAL_AND_SOCIAL_MANAGEMENT_PLAN = "Environmental and Social Management Plan"
     QAQC_COMMISSIONING_PROCEDURES = "QA/QC & Commissioning Procedures"
-    HR_MANUAL_CODE_OF_CONDUCT = "HR Manual / Code of Conduct"
+    INDUSTRIAL_SAFETY_PLAN = "Industrial Safety Plan"
+    ENVIRONMENTAL_LICENCE_EIA = "Environmental Licence / EIA"
+    EMERGENCY_RESPONSE_SECURITY_PLAN = "Emergency Response & Security Plan"
+    SITE_LEGAL_STATUS_SUMMARY = "Site Legal Status Summary"
+    LIENS_CERTIFICATE = "Liens Certificate"
+    NON_OVERLAP_WITH_PROTECTED_AREAS_CERTIFICATE = "Non-overlap with Protected Areas Certificate"
+    HR_POLICY_CODE_OF_CONDUCT = "HR Policy / Code of Conduct"
 
     # Permits Documents
     ELECTRICAL_UTILITY_FEASIBILITY_REPORT = "Electrical Utility Feasibility Report"
-    CONSTRUCTION_PERMIT = "Construction Permit"
-    ENVIRONMENTAL_PERMIT = "Environmental Permit"
     LAND_USE_PERMIT = "Land Use Permit"
-    INTERCONNECTION_AGREEMENT = "Interconnection Agreement"
 
     # Uncategorized
     UNCATEGORIZED = "Uncategorized Document"
@@ -96,7 +114,7 @@ DOCUMENT_TYPE_TO_TOP_LEVEL: dict[DocumentType, TopLevelCategory] = {
     DocumentType.INCOME_TAX_FILINGS: TopLevelCategory.COMPANY_FINANCIALS,
     DocumentType.CASH_FLOW_STATEMENTS: TopLevelCategory.COMPANY_FINANCIALS,
     DocumentType.TAX_COMPLIANCE_CERTIFICATE: TopLevelCategory.COMPANY_FINANCIALS,
-    DocumentType.ECONOMICAL_OFFER_BOQ: TopLevelCategory.COMPANY_FINANCIALS,
+    DocumentType.ECONOMICAL_OFFER_BOQ: TopLevelCategory.FINANCIAL,
     # Company Experience
     DocumentType.PROJECT_ACCEPTANCE_CERTIFICATES: TopLevelCategory.COMPANY_EXPERIENCE,
     DocumentType.OAM_CONTRACTS: TopLevelCategory.COMPANY_EXPERIENCE,
@@ -110,15 +128,18 @@ DOCUMENT_TYPE_TO_TOP_LEVEL: dict[DocumentType, TopLevelCategory] = {
     DocumentType.CABLE_SIZING_CALCULATION: TopLevelCategory.TECHNICAL,
     DocumentType.GROUNDING_SYSTEM_DIAGRAM: TopLevelCategory.TECHNICAL,
     # ESG
-    DocumentType.ESHS_ESMS_POLICIES: TopLevelCategory.ESG,
+    DocumentType.ENVIRONMENTAL_AND_SOCIAL_MANAGEMENT_PLAN: TopLevelCategory.ESG,
     DocumentType.QAQC_COMMISSIONING_PROCEDURES: TopLevelCategory.ESG,
-    DocumentType.HR_MANUAL_CODE_OF_CONDUCT: TopLevelCategory.ESG,
+    DocumentType.INDUSTRIAL_SAFETY_PLAN: TopLevelCategory.ESG,
+    DocumentType.ENVIRONMENTAL_LICENCE_EIA: TopLevelCategory.ESG,
+    DocumentType.EMERGENCY_RESPONSE_SECURITY_PLAN: TopLevelCategory.ESG,
+    DocumentType.SITE_LEGAL_STATUS_SUMMARY: TopLevelCategory.ESG,
+    DocumentType.LIENS_CERTIFICATE: TopLevelCategory.ESG,
+    DocumentType.NON_OVERLAP_WITH_PROTECTED_AREAS_CERTIFICATE: TopLevelCategory.ESG,
+    DocumentType.HR_POLICY_CODE_OF_CONDUCT: TopLevelCategory.ESG,
+    DocumentType.LAND_USE_PERMIT: TopLevelCategory.ESG,
     # Permits
     DocumentType.ELECTRICAL_UTILITY_FEASIBILITY_REPORT: TopLevelCategory.PERMITS,
-    DocumentType.CONSTRUCTION_PERMIT: TopLevelCategory.PERMITS,
-    DocumentType.ENVIRONMENTAL_PERMIT: TopLevelCategory.PERMITS,
-    DocumentType.LAND_USE_PERMIT: TopLevelCategory.PERMITS,
-    DocumentType.INTERCONNECTION_AGREEMENT: TopLevelCategory.PERMITS,
 }
 
 DOCUMENT_TYPE_DESCRIPTIONS: dict[DocumentType, str] = {
@@ -126,7 +147,7 @@ DOCUMENT_TYPE_DESCRIPTIONS: dict[DocumentType, str] = {
     DocumentType.CERTIFICATE_OF_LEGAL_EXISTENCE: "Official certificate containing company legal name, tax ID (RUC), commercial activity, and incorporation date",
     DocumentType.SHAREHOLDERS_DECLARATION: "Declaration document listing shareholders/owners with their ownership percentages (>10% stake)",
     DocumentType.LEGAL_REPRESENTATIVE_APPOINTMENT: "Official appointment document for the company's legal representative including validity period",
-    DocumentType.ENERGY_CONSUMPTION_BILLS: "Energy bills or energy reports from the electricity utility provider (e.g., CNEL) showing monthly energy consumption, demand, and tariffs for 12 months. Used to create consumption profile with monthly and annual statistics.",
+    DocumentType.ENERGY_CONSUMPTION_BILLS: "Energy consumption bills or energy reports from the electricity utility provider",
     # Company Financials
     DocumentType.FINANCIAL_STATEMENTS: "Audited or internal financial statements with balance sheet and income statement data including revenue, net income, EBIT, assets, liabilities, and equity (minimum 3 years)",
     DocumentType.INCOME_TAX_FILINGS: "SRI/Tax authority filings showing income tax paid per fiscal year (minimum 3 years)",
@@ -145,15 +166,18 @@ DOCUMENT_TYPE_DESCRIPTIONS: dict[DocumentType, str] = {
     DocumentType.CABLE_SIZING_CALCULATION: "Cable sizing calculations and electrical specifications",
     DocumentType.GROUNDING_SYSTEM_DIAGRAM: "Grounding system design and single line diagram",
     # ESG
-    DocumentType.ESHS_ESMS_POLICIES: "Environmental, Social, Health and Safety (ESHS) or Environmental and Social Management System (ESMS) policies document covering IFC performance standards, OHS procedures, hazardous materials handling, labor procedures, waste management, and resource use controls",
+    DocumentType.ENVIRONMENTAL_AND_SOCIAL_MANAGEMENT_PLAN: "Environmental and Social Management Plan (EMP/ESMP) or ESHS Policy. This document covers high-level corporate ESG commitments AND/OR field-level worker safety and health. It may include: validity periods, corporate monitoring indicators, mitigation strategies for biodiversity vs climate, AND/OR strict field procedures, PPE rules, worker rights, hazard handling, site waste disposal, and OHS principles. Often titled 'PGAS', 'EMP', 'ESMP', 'Health & Safety Plan', or 'ESHS Policy'.",
     DocumentType.QAQC_COMMISSIONING_PROCEDURES: "Quality Assurance/Quality Control and commissioning procedures document including visual inspection summary, electrical test results, and performance metrics",
-    DocumentType.HR_MANUAL_CODE_OF_CONDUCT: "Human Resources manual or Code of Conduct document containing IFC-aligned HR practices and company policies",
+    DocumentType.INDUSTRIAL_SAFETY_PLAN: "Industrial Safety Plan document containing IFC-aligned HR practices that should be summarized in the source document language",
+    DocumentType.ENVIRONMENTAL_LICENCE_EIA: "Environmental licence or EIA documentation including licence metadata and ESG risk-screening findings for habitats, biodiversity, communities, heritage, and consultation.",
+    DocumentType.EMERGENCY_RESPONSE_SECURITY_PLAN: "Emergency response and security plan covering climate and security risks, crisis protocols, adaptation actions, and authority coordination.",
+    DocumentType.SITE_LEGAL_STATUS_SUMMARY: "Site legal status summary with land tenure, title/lease documentation, rights and claims, disputes, and expropriation risk context.",
+    DocumentType.LIENS_CERTIFICATE: "Liens certificate detailing existing mortgages/lien encumbrances and whether lender consent is required.",
+    DocumentType.NON_OVERLAP_WITH_PROTECTED_AREAS_CERTIFICATE: "Certificate confirming non-overlap with protected areas, including geographic reference and issuance/validity details.",
+    DocumentType.HR_POLICY_CODE_OF_CONDUCT: "HR policy and code of conduct covering human rights, labor standards, forced/child labor prohibition, non-discrimination, and supplier labor requirements.",
+    DocumentType.LAND_USE_PERMIT: "Land use permit or zoning approval for the project site",
     # Permits
     DocumentType.ELECTRICAL_UTILITY_FEASIBILITY_REPORT: "Utility feasibility report from the electrical distribution company containing capacity requested, feasibility status, available hosting capacity, maximum permitted annual generation, regulatory framework, issue date, and validity period",
-    DocumentType.CONSTRUCTION_PERMIT: "Construction permit or building permit authorizing the construction of the solar installation",
-    DocumentType.ENVIRONMENTAL_PERMIT: "Environmental impact assessment or environmental permit for the project",
-    DocumentType.LAND_USE_PERMIT: "Land use permit or zoning approval for the project site",
-    DocumentType.INTERCONNECTION_AGREEMENT: "Grid interconnection agreement with the utility company",
     # Uncategorized
     DocumentType.UNCATEGORIZED: "Documents that do not fit into any of the predefined categories",
 }
@@ -192,12 +216,7 @@ class ShareholderEntry(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     shareholder_name: str = Field(description="Full name of the shareholder")
-    ownership_percentage: Optional[float] = Field(
-        default=None, description="Ownership percentage (only shareholders with >10% stake)"
-    )
-    shareholder_type: Optional[str] = Field(
-        default=None, description="Type of shareholder (Individual/Corporate/Institutional)"
-    )
+    ownership_percentage: float = Field(description="Ownership percentage of the shareholder")
 
 
 class ShareholderStructure(BaseModel):
@@ -210,9 +229,6 @@ class ShareholderStructure(BaseModel):
     )
     shareholders: List[ShareholderEntry] = Field(
         description="List of shareholders with >10% ownership stake"
-    )
-    total_declared_percentage: Optional[float] = Field(
-        default=None, description="Sum of all declared ownership percentages"
     )
 
 
@@ -228,9 +244,6 @@ class LegalRepresentation(BaseModel):
         description="Date when the legal representative was appointed (format: YYYY-MM-DD if possible)"
     )
     years_of_validity: int = Field(description="Number of years the appointment is valid")
-    appointment_expiry_date: Optional[str] = Field(
-        default=None, description="Computed expiry date (appointment date + years of validity)"
-    )
 
 
 # =============================================================================
@@ -238,157 +251,207 @@ class LegalRepresentation(BaseModel):
 # =============================================================================
 
 
-class MonthlyEnergyConsumptionEntry(BaseModel):
-    """
-    Monthly energy consumption data entry.
-
-    Represents one month of energy billing data from utility provider.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    # -------------------------------------------------------------------------
-    # Month Identification
-    # -------------------------------------------------------------------------
-    month: str = Field(description="Month name (January, February, etc.) or month number (1-12)")
-    year: Optional[int] = Field(
-        default=None,
-        description="Year of the billing period (e.g., 2024)",
-    )
-    billing_period_start: Optional[str] = Field(
-        default=None,
-        description="Start date of the billing period (YYYY-MM-DD)",
-    )
-    billing_period_end: Optional[str] = Field(
-        default=None,
-        description="End date of the billing period (YYYY-MM-DD)",
-    )
-
-    # -------------------------------------------------------------------------
-    # Energy Consumption (Extracted)
-    # -------------------------------------------------------------------------
-    energy_consumption_kwh: float = Field(
-        description="Monthly energy consumption in kWh, MWh, or GWh (convert to kWh)"
-    )
-
-    # -------------------------------------------------------------------------
-    # Demand Values (Extracted)
-    # -------------------------------------------------------------------------
-    average_demand_kw: Optional[float] = Field(
-        default=None,
-        description="Monthly average demand in kW or MW (convert to kW)",
-    )
-    peak_demand_kw: Optional[float] = Field(
-        default=None,
-        description="Monthly peak demand in kW or MW (convert to kW)",
-    )
-
-    # -------------------------------------------------------------------------
-    # Tariff Information (Extracted)
-    # -------------------------------------------------------------------------
-    energy_tariff_usd_kwh: Optional[float] = Field(
-        default=None,
-        description="Energy tariff in $/kWh for the month",
-    )
-    total_bill_amount_usd: Optional[float] = Field(
-        default=None,
-        description="Total bill amount in USD for the month",
-    )
-
-
 class EnergyConsumptionBillsData(BaseModel):
     """
-    Schema for Energy Consumption Bills / Energy Reports (Section 2.1).
+    Single monthly electricity bill extraction entry.
 
-    Energy bills from the electricity utility provider (e.g., CNEL) showing
-    monthly energy consumption, demand, and tariffs for 12 months.
-    Output structure: Consumption Profile (Table + Single values + Graph)
+    One entry corresponds to one uploaded monthly bill document.
+    Contains the full bill-level account/provider metadata and monthly consumption
+    metrics for that billing period.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     # -------------------------------------------------------------------------
-    # Utility Provider Information (Extracted)
+    # Utility Provider & Account Information (monthly bill context)
     # -------------------------------------------------------------------------
     electricity_utility_provider: Optional[str] = Field(
         default=None,
-        description="Name of the electricity utility provider (e.g., CNEL, EEQ)",
+        description=(
+            "Name of the electricity utility provider. "
+            "Primary source: visual logo at the top-left corner of the bill (e.g., CNEL EP, EEQ). "
+            "Fallback: first header line with the full legal provider name "
+            "(e.g., 'Empresa Electrica Publica Estrategica Corporacion Nacional de Electricidad CNEL EP'). "
+            "Return a normalized short name (e.g., 'CNEL EP', 'EEQ')."
+        ),
+    )
+    razon_social: Optional[str] = Field(
+        default=None,
+        description=(
+            "Legal business name of the account holder / offtaker as printed on the bill (Razon Social). "
+            "Used for verification only."
+        ),
+    )
+    ruc: Optional[str] = Field(
+        default=None,
+        description=(
+            "RUC (Ecuador tax ID) of the account holder as printed on the bill. "
+            "Used for verification only."
+        ),
+    )
+    contract_number: Optional[str] = Field(
+        default=None,
+        description=(
+            "Contract or supply point number as printed on the bill. " "Used for verification only."
+        ),
     )
     account_number: Optional[str] = Field(
         default=None,
-        description="Utility account number or client ID",
+        description="Utility account number or client ID printed on the bill",
     )
     meter_number: Optional[str] = Field(
         default=None,
-        description="Electric meter number",
+        description="Electric meter identifier printed on the bill",
     )
     service_address: Optional[str] = Field(
         default=None,
-        description="Service address for the energy account",
+        description="Service address for the energy account as printed on the bill",
     )
     tariff_category: Optional[str] = Field(
         default=None,
-        description="Tariff category (e.g., Industrial, Commercial, Residential)",
+        description=(
+            "Tariff category / bill type as stated on the bill. "
+            "Examples: Sin Demanda, Demanda Horaria, Demanda Horaria Diferenciada, Con Demanda, "
+            "Industrial, Commercial, Residential."
+        ),
+    )
+    power_factor: Optional[float] = Field(
+        default=None,
+        description=(
+            "Power factor (FP) for the billing period as printed on the bill (e.g., 0.9784). "
+            "Dimensionless value between 0 and 1."
+        ),
     )
 
     # -------------------------------------------------------------------------
-    # Monthly Consumption Data (Table - 12 months)
+    # Billing Period Identification
     # -------------------------------------------------------------------------
-    monthly_consumption: List[MonthlyEnergyConsumptionEntry] = Field(
-        description="Monthly energy consumption data for 12 months"
+    month: str = Field(description="Calendar month of the billing period (e.g., 'January' or '1')")
+    year: Optional[int] = Field(
+        default=None,
+        description="Calendar year of the billing period (e.g., 2025)",
+    )
+    billing_period_start: Optional[str] = Field(
+        default=None,
+        description="Start date of the billing period shown on the bill (YYYY-MM-DD)",
+    )
+    billing_period_end: Optional[str] = Field(
+        default=None,
+        description="End date of the billing period shown on the bill (YYYY-MM-DD)",
     )
 
     # -------------------------------------------------------------------------
-    # Computed Annual Totals
+    # Energy Consumption
+    # -------------------------------------------------------------------------
+    energy_consumption_kwh: float = Field(
+        description=(
+            "Total energy consumed this billing period in kWh. "
+            "In the detail table, sum 'Consumo Total' for every row whose Unidad Medida is kWh "
+            "(Energia act. hor. A + B + C, and D if present). "
+            "For bill type 4 (Con Demanda - single energy row), use that row's Consumo Total directly. "
+            "Convert MWh or GWh to kWh."
+        )
+    )
+
+    # -------------------------------------------------------------------------
+    # Demand Values
+    # -------------------------------------------------------------------------
+    average_demand_kw: Optional[float] = Field(
+        default=None,
+        description=(
+            "Billable demand for this billing period in kW. "
+            "Read from the 'Demanda facturable' row, Consumo Total column (unit kW). "
+            "Set to null if no 'Demanda facturable' row exists (bill type 1 - Sin Demanda). "
+            "Convert MW to kW if needed."
+        ),
+    )
+
+    # -------------------------------------------------------------------------
+    # Tariff & Cost
+    # -------------------------------------------------------------------------
+    energy_tariff_usd_kwh: Optional[float] = Field(
+        default=None,
+        description=(
+            "Computed monthly weighted energy tariff in USD/kWh for this billing period. "
+            "Formula: total_bill_amount_usd / energy_consumption_kwh. "
+            "Use values computed from kWh detail rows. "
+            "Round to 4 decimal places."
+        ),
+    )
+    total_bill_amount_usd: Optional[float] = Field(
+        default=None,
+        description=(
+            "Total energy charge in USD for this billing period. "
+            "Sum the 'Monto' column for all kWh rows in the detail table "
+            "(Energia act. hor. A + B + C + D if present). "
+            "For bill type 4 (single energy row), use that row's Monto directly."
+        ),
+    )
+
+
+class EnergyConsumptionBillsCollection(BaseModel):
+    """
+    Top-level extraction schema for energy consumption bills.
+
+    Users upload one document per month. Each month is represented as one
+    entry in `monthly_consumption` (a List[EnergyConsumptionBillsData]).
+
+    Annual aggregation is performed downstream after collecting all monthly entries.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    # -------------------------------------------------------------------------
+    # Monthly Consumption Data (array; one entry = one uploaded monthly bill)
+    # -------------------------------------------------------------------------
+    monthly_consumption: List[EnergyConsumptionBillsData] = Field(
+        description=(
+            "Monthly bill entries extracted from uploaded documents. "
+            "Each entry contains account/provider metadata, billing period, and consumption values."
+        )
+    )
+
+    # -------------------------------------------------------------------------
+    # Computed Annual Totals (populated downstream after all months collected)
     # -------------------------------------------------------------------------
     annual_energy_consumption_kwh: Optional[float] = Field(
         default=None,
-        description="Total annual energy consumption in kWh - Computed as sum of monthly consumption",
+        description=(
+            "Total annual energy consumption in kWh - "
+            "sum of energy_consumption_kwh across all monthly entries. "
+            "Leave null for single-month extraction; compute downstream."
+        ),
     )
-    annual_energy_tariff_usd_kwh: Optional[float] = Field(
+    annual_average_demand_kw: Optional[float] = Field(
         default=None,
-        description="Weighted average annual energy tariff in $/kWh - Computed from monthly consumption and tariffs",
+        description=(
+            "Annual average demand in kW - "
+            "sum of average_demand_kw across all 12 monthly entries divided by 12. "
+            "Leave null if no monthly demand values are available; compute downstream."
+        ),
     )
 
-    # -------------------------------------------------------------------------
-    # Consumption Profile Graph Data (Computed)
-    # -------------------------------------------------------------------------
-    consumption_profile_graph_data: Optional[dict] = Field(
-        default=None,
-        description="Data for generating monthly consumption and demand bar charts (line/bar charts)",
-    )
+    def compute_annual_totals(self) -> "EnergyConsumptionBillsCollection":
+        """Compute annual energy consumption and average demand from monthly entries."""
+        if not self.monthly_consumption:
+            return self
 
-    def compute_annual_totals(self) -> "EnergyConsumptionBillsData":
-        """Compute annual energy consumption and weighted average tariff."""
-        if self.monthly_consumption:
-            # Sum annual consumption
-            total_consumption = sum(
-                m.energy_consumption_kwh
-                for m in self.monthly_consumption
-                if m.energy_consumption_kwh is not None
-            )
-            self.annual_energy_consumption_kwh = (
-                round(total_consumption, 2) if total_consumption else None
-            )
+        # Sum annual consumption across all monthly entries
+        total_consumption = sum(
+            m.energy_consumption_kwh
+            for m in self.monthly_consumption
+            if m.energy_consumption_kwh is not None
+        )
+        self.annual_energy_consumption_kwh = (
+            round(total_consumption, 2) if total_consumption else None
+        )
 
-            # Compute weighted average tariff
-            weighted_sum = 0.0
-            total_weight = 0.0
-            for m in self.monthly_consumption:
-                if m.energy_consumption_kwh and m.energy_tariff_usd_kwh:
-                    weighted_sum += m.energy_consumption_kwh * m.energy_tariff_usd_kwh
-                    total_weight += m.energy_consumption_kwh
-
-            if total_weight > 0:
-                self.annual_energy_tariff_usd_kwh = round(weighted_sum / total_weight, 4)
-
-            # Generate graph data
-            self.consumption_profile_graph_data = {
-                "months": [m.month for m in self.monthly_consumption],
-                "consumption_kwh": [m.energy_consumption_kwh for m in self.monthly_consumption],
-                "average_demand_kw": [m.average_demand_kw for m in self.monthly_consumption],
-                "peak_demand_kw": [m.peak_demand_kw for m in self.monthly_consumption],
-            }
+        # Annual average demand: sum of monthly average_demand_kw / 12
+        demand_values = [
+            m.average_demand_kw for m in self.monthly_consumption if m.average_demand_kw is not None
+        ]
+        if demand_values:
+            self.annual_average_demand_kw = round(sum(demand_values) / 12, 4)
 
         return self
 
@@ -631,12 +694,66 @@ class YearlyFinancialData(BaseModel):
         return self
 
 
+def _coerce_year(value: Any) -> Optional[int]:
+    """Convert extracted year-like values to integers when possible."""
+    if isinstance(value, bool):
+        return None
+
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _get_financial_ratio_year(entry: Any) -> Optional[int]:
+    """Read a year value from a financial ratio entry."""
+    if isinstance(entry, BaseModel):
+        return _coerce_year(getattr(entry, "year", None))
+
+    if isinstance(entry, dict):
+        return _coerce_year(entry.get("year"))
+
+    return None
+
+
+def _select_financial_statement_year_rows(
+    financial_ratios: List[Any], fiscal_year: Optional[int]
+) -> Tuple[List[int], Optional[int]]:
+    """Pick the row indexes that belong to the document fiscal year."""
+    if not financial_ratios:
+        return [], _coerce_year(fiscal_year)
+
+    target_year = _coerce_year(fiscal_year)
+    if target_year is None:
+        available_years = [
+            year
+            for year in (_get_financial_ratio_year(entry) for entry in financial_ratios)
+            if year is not None
+        ]
+        if available_years:
+            target_year = max(available_years)
+
+    if target_year is None:
+        return list(range(len(financial_ratios))), None
+
+    selected_indexes = [
+        index
+        for index, entry in enumerate(financial_ratios)
+        if _get_financial_ratio_year(entry) == target_year
+    ]
+    if not selected_indexes:
+        return list(range(len(financial_ratios))), target_year
+
+    return selected_indexes, target_year
+
+
 class FinancialStatementsData(BaseModel):
     """
     Schema for Financial Statements (Section 1.2).
 
-    Extracts financial data for minimum 3 years from audited or internal
-    financial statements. Includes both extracted values and computed ratios.
+    Extracts only the financial data for the document's fiscal year from audited
+    or internal financial statements. Comparative prior-year figures may appear
+    in the source document, but they must not be returned as separate entries.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -644,33 +761,308 @@ class FinancialStatementsData(BaseModel):
     # -------------------------------------------------------------------------
     # Metadata
     # -------------------------------------------------------------------------
-    company_name: Optional[str] = Field(
-        default=None, description="Company name as stated in the financial statements"
-    )
-    currency: Optional[str] = Field(
+    # company_name: Optional[str] = Field(
+    #     default=None, description="Company name as stated in the financial statements"
+    # )
+    # currency: Optional[str] = Field(
+    #     default=None,
+    #     description="Currency used in the statements (e.g., USD, EUR, or local currency code)",
+    # )
+    # is_audited: Optional[bool] = Field(
+    #     default=None,
+    #     description="Whether the financial statements are audited (True) or internal/unaudited (False)",
+    # )
+    # auditor_name: Optional[str] = Field(
+    #     default=None, description="Name of the auditing firm (if audited)"
+    # )
+
+    fiscal_year: Optional[int] = Field(
         default=None,
-        description="Currency used in the statements (e.g., USD, EUR, or local currency code)",
-    )
-    is_audited: Optional[bool] = Field(
-        default=None,
-        description="Whether the financial statements are audited (True) or internal/unaudited (False)",
-    )
-    auditor_name: Optional[str] = Field(
-        default=None, description="Name of the auditing firm (if audited)"
+        description=(
+            "Fiscal year of the document being extracted (for example, 2021 for a "
+            "2021 statement that also shows 2020 comparatives)."
+        ),
     )
 
     # -------------------------------------------------------------------------
-    # Yearly Financial Data (minimum 3 years)
+    # Yearly Financial Data
     # -------------------------------------------------------------------------
     financial_ratios: List[YearlyFinancialData] = Field(
-        description="Financial data and ratios for each fiscal year"
+        description=(
+            "Only the financial data for fiscal_year. Exclude comparative prior-year "
+            "rows or columns such as year-1."
+        )
     )
+
+    @model_validator(mode="after")
+    def normalize_to_document_fiscal_year(self) -> "FinancialStatementsData":
+        """Keep only the row that belongs to the current document fiscal year."""
+        selected_indexes, target_year = _select_financial_statement_year_rows(
+            self.financial_ratios,
+            self.fiscal_year,
+        )
+
+        if target_year is not None:
+            self.fiscal_year = target_year
+
+        if selected_indexes and len(selected_indexes) != len(self.financial_ratios):
+            self.financial_ratios = [self.financial_ratios[index] for index in selected_indexes]
+
+        return self.compute_all_ratios()
 
     def compute_all_ratios(self) -> "FinancialStatementsData":
         """Compute ratios for all years."""
         for year_data in self.financial_ratios:
             year_data.compute_ratios()
         return self
+
+
+def normalize_financial_statements_extraction(
+    extracted: Dict[str, Any],
+    extraction_metadata: Optional[Dict[str, Any]] = None,
+) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """Normalize extracted financial statements data to the document fiscal year."""
+    financial_ratios = extracted.get("financial_ratios")
+    if not isinstance(financial_ratios, list):
+        return extracted, extraction_metadata
+
+    selected_indexes, target_year = _select_financial_statement_year_rows(
+        financial_ratios,
+        extracted.get("fiscal_year"),
+    )
+
+    normalized_extracted = dict(extracted)
+    if target_year is not None:
+        normalized_extracted["fiscal_year"] = target_year
+
+    if selected_indexes and len(selected_indexes) != len(financial_ratios):
+        normalized_extracted["financial_ratios"] = [
+            financial_ratios[index] for index in selected_indexes
+        ]
+
+    normalized_metadata = extraction_metadata
+    if isinstance(extraction_metadata, dict):
+        normalized_metadata = dict(extraction_metadata)
+        metadata_rows = extraction_metadata.get("financial_ratios")
+        if isinstance(metadata_rows, list):
+            normalized_metadata["financial_ratios"] = [
+                metadata_rows[index] for index in selected_indexes if index < len(metadata_rows)
+            ]
+
+    return normalized_extracted, normalized_metadata
+
+
+def _get_annual_filing_year(entry: Any) -> Optional[int]:
+    """Read a year value from an annual tax filing entry."""
+    if isinstance(entry, BaseModel):
+        return _coerce_year(getattr(entry, "fiscal_year", None))
+    if isinstance(entry, dict):
+        return _coerce_year(entry.get("fiscal_year"))
+    return None
+
+
+def _select_income_tax_filing_rows(
+    annual_filings: List[Any], fiscal_year: Optional[int]
+) -> Tuple[List[int], Optional[int]]:
+    """Pick the row indexes that belong to the document fiscal year."""
+    if not annual_filings:
+        return [], _coerce_year(fiscal_year)
+
+    target_year = _coerce_year(fiscal_year)
+    if target_year is None:
+        available_years = [
+            year
+            for year in (_get_annual_filing_year(entry) for entry in annual_filings)
+            if year is not None
+        ]
+        if available_years:
+            target_year = max(available_years)
+
+    if target_year is None:
+        return list(range(len(annual_filings))), None
+
+    selected_indexes = [
+        index
+        for index, entry in enumerate(annual_filings)
+        if _get_annual_filing_year(entry) == target_year
+    ]
+    if not selected_indexes:
+        return list(range(len(annual_filings))), target_year
+
+    # Keep at most one entry for the target year
+    return selected_indexes[:1], target_year
+
+
+def normalize_income_tax_filings_extraction(
+    extracted: Dict[str, Any],
+    extraction_metadata: Optional[Dict[str, Any]] = None,
+) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """Normalize extracted income tax filings data to the document fiscal year."""
+    annual_filings = extracted.get("annual_filings")
+    if not isinstance(annual_filings, list):
+        return extracted, extraction_metadata
+
+    selected_indexes, target_year = _select_income_tax_filing_rows(
+        annual_filings,
+        extracted.get("fiscal_year"),
+    )
+
+    normalized_extracted = dict(extracted)
+    if target_year is not None:
+        normalized_extracted["fiscal_year"] = target_year
+
+    if selected_indexes and len(selected_indexes) != len(annual_filings):
+        normalized_extracted["annual_filings"] = [
+            annual_filings[index] for index in selected_indexes
+        ]
+
+    normalized_metadata = extraction_metadata
+    if isinstance(extraction_metadata, dict):
+        normalized_metadata = dict(extraction_metadata)
+        metadata_rows = extraction_metadata.get("annual_filings")
+        if isinstance(metadata_rows, list):
+            normalized_metadata["annual_filings"] = [
+                metadata_rows[index] for index in selected_indexes if index < len(metadata_rows)
+            ]
+
+    return normalized_extracted, normalized_metadata
+
+
+def _select_cash_flow_year_rows(
+    annual_cash_flows: List[Any], fiscal_year: Optional[int]
+) -> Tuple[List[int], Optional[int]]:
+    """Pick the row indexes that belong to the document fiscal year."""
+    if not annual_cash_flows:
+        return [], _coerce_year(fiscal_year)
+
+    target_year = _coerce_year(fiscal_year)
+    if target_year is None:
+        available_years = [
+            year
+            for year in (_get_annual_filing_year(entry) for entry in annual_cash_flows)
+            if year is not None
+        ]
+        if available_years:
+            target_year = max(available_years)
+
+    if target_year is None:
+        return list(range(len(annual_cash_flows))), None
+
+    selected_indexes = [
+        index
+        for index, entry in enumerate(annual_cash_flows)
+        if _get_annual_filing_year(entry) == target_year
+    ]
+    if not selected_indexes:
+        return list(range(len(annual_cash_flows))), target_year
+
+    # Keep at most one entry for the target year
+    return selected_indexes[:1], target_year
+
+
+def normalize_cash_flow_statements_extraction(
+    extracted: Dict[str, Any],
+    extraction_metadata: Optional[Dict[str, Any]] = None,
+) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """Normalize extracted cash flow statements data to the document fiscal year."""
+    annual_cash_flows = extracted.get("annual_cash_flows")
+    if not isinstance(annual_cash_flows, list):
+        return extracted, extraction_metadata
+
+    selected_indexes, target_year = _select_cash_flow_year_rows(
+        annual_cash_flows,
+        extracted.get("fiscal_year"),
+    )
+
+    normalized_extracted = dict(extracted)
+    if target_year is not None:
+        normalized_extracted["fiscal_year"] = target_year
+
+    if selected_indexes and len(selected_indexes) != len(annual_cash_flows):
+        normalized_extracted["annual_cash_flows"] = [
+            annual_cash_flows[index] for index in selected_indexes
+        ]
+
+    normalized_metadata = extraction_metadata
+    if isinstance(extraction_metadata, dict):
+        normalized_metadata = dict(extraction_metadata)
+        metadata_rows = extraction_metadata.get("annual_cash_flows")
+        if isinstance(metadata_rows, list):
+            normalized_metadata["annual_cash_flows"] = [
+                metadata_rows[index] for index in selected_indexes if index < len(metadata_rows)
+            ]
+
+    return normalized_extracted, normalized_metadata
+
+
+_COORD_NUMBER_RE = re.compile(r"[-+]?\d+(?:\.\d+)?")
+
+
+def _parse_coordinate_component(value: str, negative_directions: set) -> Optional[float]:
+    """Parse a single lat or lon component from various notations."""
+    cleaned = value.upper().replace("(", " ").replace(")", " ")
+    direction = next(
+        (d for d in ("N", "S", "E", "W") if d in cleaned),
+        None,
+    )
+    numbers = [abs(float(m)) for m in _COORD_NUMBER_RE.findall(cleaned)]
+    if not numbers:
+        return None
+    decimal = numbers[0]
+    if len(numbers) > 1:
+        decimal += numbers[1] / 60.0
+    if len(numbers) > 2:
+        decimal += numbers[2] / 3600.0
+    if direction is not None:
+        sign = -1.0 if direction in negative_directions else 1.0
+    else:
+        sign = -1.0 if cleaned.lstrip().startswith("-") else 1.0
+    return sign * decimal
+
+
+def _build_google_maps_link(raw_coordinates: Optional[str]) -> Optional[str]:
+    """Build a Google Maps URL from extracted geographical coordinates."""
+    if not raw_coordinates:
+        return None
+    parts = [p.strip() for p in raw_coordinates.split(",", 1)]
+    if len(parts) == 2:
+        lat = _parse_coordinate_component(parts[0], {"S"})
+        lng = _parse_coordinate_component(parts[1], {"W"})
+        if lat is not None and lng is not None:
+            return f"https://www.google.com/maps?q={lat:.8f},{lng:.8f}"
+    return f"https://www.google.com/maps/search/?api=1&query={quote(raw_coordinates)}"
+
+
+def normalize_extracted_document(
+    document_type: DocumentType | str,
+    extracted: Dict[str, Any],
+    extraction_metadata: Optional[Dict[str, Any]] = None,
+) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """Apply document-type-specific normalization to extracted payloads."""
+    doc_type_value = (
+        document_type.value if isinstance(document_type, DocumentType) else document_type
+    )
+
+    print(f"Normalizing extracted data for document type: {doc_type_value}")
+    print(f"Initial extracted data keys: {extraction_metadata}")
+
+    if doc_type_value == DocumentType.FINANCIAL_STATEMENTS.value:
+        return normalize_financial_statements_extraction(extracted, extraction_metadata)
+
+    if doc_type_value == DocumentType.INCOME_TAX_FILINGS.value:
+        return normalize_income_tax_filings_extraction(extracted, extraction_metadata)
+
+    if doc_type_value == DocumentType.CASH_FLOW_STATEMENTS.value:
+        return normalize_cash_flow_statements_extraction(extracted, extraction_metadata)
+
+    if doc_type_value == DocumentType.PROJECT_SIMULATION_REPORT.value:
+        normalized = dict(extracted)
+        normalized["google_maps_link"] = _build_google_maps_link(
+            normalized.get("geographical_coordinates")
+        )
+        return normalized, extraction_metadata
+
+    return extracted, extraction_metadata
 
 
 class AnnualTaxFiling(BaseModel):
@@ -689,8 +1081,8 @@ class IncomeTaxFilingsData(BaseModel):
     """
     Schema for Income Tax Filings (Section 1.3).
 
-    Extracts tax payment information from SRI/Tax Authority filings
-    for minimum 3 years.
+    Extracts tax payment information from a single SRI/Tax Authority filing.
+    Each document covers exactly one fiscal year.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -699,12 +1091,52 @@ class IncomeTaxFilingsData(BaseModel):
         default=None, description="Company name as stated in the tax filings"
     )
     tax_id_ruc: Optional[str] = Field(default=None, description="Tax ID (RUC) number")
-    tax_authority: Optional[str] = Field(
-        default=None, description="Tax authority name (e.g., SRI for Ecuador)"
+    # tax_authority: Optional[str] = Field(
+    #     default=None, description="Tax authority name (e.g., SRI for Ecuador)"
+    # )
+    fiscal_year: Optional[int] = Field(
+        default=None,
+        description=(
+            "Fiscal year of the document being extracted (e.g., 2021). "
+            "Each document covers a single year."
+        ),
     )
     annual_filings: List[AnnualTaxFiling] = Field(
-        description="Tax filing data for each fiscal year"
+        description=(
+            "Tax filing data for the document's fiscal year only. "
+            "Return exactly one entry matching the document year. "
+            "Do not include prior-year or comparative data."
+        )
     )
+
+    @model_validator(mode="after")
+    def normalize_to_document_fiscal_year(self) -> "IncomeTaxFilingsData":
+        """Keep only the filing entry that belongs to the document's fiscal year."""
+        if not self.annual_filings:
+            return self
+
+        target_year = _coerce_year(self.fiscal_year)
+
+        if target_year is None:
+            available_years = [
+                _coerce_year(entry.fiscal_year)
+                for entry in self.annual_filings
+                if _coerce_year(entry.fiscal_year) is not None
+            ]
+            if available_years:
+                target_year = max(available_years)
+
+        if target_year is not None:
+            self.fiscal_year = target_year
+            matched = [
+                entry
+                for entry in self.annual_filings
+                if _coerce_year(entry.fiscal_year) == target_year
+            ]
+            if matched:
+                self.annual_filings = matched[:1]
+
+        return self
 
 
 class AnnualCashFlow(BaseModel):
@@ -716,22 +1148,14 @@ class AnnualCashFlow(BaseModel):
     operating_cash_flow: Optional[float] = Field(
         default=None, description="Net cash from operating activities"
     )
-    investing_cash_flow: Optional[float] = Field(
-        default=None, description="Net cash from investing activities"
-    )
-    financing_cash_flow: Optional[float] = Field(
-        default=None, description="Net cash from financing activities"
-    )
-    net_change_in_cash: Optional[float] = Field(
-        default=None, description="Net change in cash and cash equivalents"
-    )
 
 
 class CashFlowStatementsData(BaseModel):
     """
     Schema for Cash Flow Statements (Section 1.4).
 
-    Note: Per requirements, this may only be provided for 1 year.
+    Extracts cash flow data for the document's fiscal year only.
+    Each document covers exactly one fiscal year.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -740,9 +1164,49 @@ class CashFlowStatementsData(BaseModel):
         default=None, description="Company name as stated in the cash flow statements"
     )
     currency: Optional[str] = Field(default=None, description="Currency used (e.g., USD, EUR)")
-    annual_cash_flows: List[AnnualCashFlow] = Field(
-        description="Cash flow data for each fiscal year"
+    fiscal_year: Optional[int] = Field(
+        default=None,
+        description=(
+            "Fiscal year of the document being extracted (e.g., 2021). "
+            "Each document covers a single year."
+        ),
     )
+    annual_cash_flows: List[AnnualCashFlow] = Field(
+        description=(
+            "Cash flow data for the document's fiscal year only. "
+            "Return exactly one entry matching the document year. "
+            "Do not include prior-year or comparative data."
+        )
+    )
+
+    @model_validator(mode="after")
+    def normalize_to_document_fiscal_year(self) -> "CashFlowStatementsData":
+        """Keep only the cash flow entry that belongs to the document's fiscal year."""
+        if not self.annual_cash_flows:
+            return self
+
+        target_year = _coerce_year(self.fiscal_year)
+
+        if target_year is None:
+            available_years = [
+                _coerce_year(entry.fiscal_year)
+                for entry in self.annual_cash_flows
+                if _coerce_year(entry.fiscal_year) is not None
+            ]
+            if available_years:
+                target_year = max(available_years)
+
+        if target_year is not None:
+            self.fiscal_year = target_year
+            matched = [
+                entry
+                for entry in self.annual_cash_flows
+                if _coerce_year(entry.fiscal_year) == target_year
+            ]
+            if matched:
+                self.annual_cash_flows = matched[:1]
+
+        return self
 
 
 class TaxComplianceCertificateData(BaseModel):
@@ -766,9 +1230,12 @@ class TaxComplianceCertificateData(BaseModel):
     tax_compliance_status: str = Field(
         description="Compliance status text (e.g., 'Compliant', 'No outstanding debts', 'Al día en obligaciones')"
     )
-    has_outstanding_debts: Optional[bool] = Field(
+    has_outstanding_debts: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether there are outstanding tax debts (should be False for compliant status)",
+        description=(
+            "Whether there are outstanding tax debts. "
+            "For a compliant status, the expected answer is No. " + YES_NO_RESPONSE_INSTRUCTION
+        ),
     )
     validity_period: Optional[str] = Field(
         default=None, description="Period the certificate is valid for (if specified)"
@@ -830,9 +1297,10 @@ class ProjectAcceptanceCertificateEntry(BaseModel):
     # -------------------------------------------------------------------------
     # Signature Confirmation
     # -------------------------------------------------------------------------
-    signed_by_client: Optional[bool] = Field(
+    signed_by_client: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether the certificate is signed by the client (Yes/No)",
+        description="Whether the certificate is signed by the client. "
+        + YES_NO_RESPONSE_INSTRUCTION,
     )
     signatory_name: Optional[str] = Field(
         default=None,
@@ -869,48 +1337,6 @@ class ProjectAcceptanceCertificatesData(BaseModel):
     certificates: List[ProjectAcceptanceCertificateEntry] = Field(
         description="List of project acceptance certificates (one entry per project)"
     )
-
-    # -------------------------------------------------------------------------
-    # Summary Statistics (computed)
-    # -------------------------------------------------------------------------
-    total_projects: Optional[int] = Field(
-        default=None,
-        description="Total number of projects with acceptance certificates",
-    )
-    total_capacity_kw: Optional[float] = Field(
-        default=None,
-        description="Total capacity of all projects in kW (sum of project capacities)",
-    )
-    provisional_certificates_count: Optional[int] = Field(
-        default=None,
-        description="Number of provisional acceptance certificates",
-    )
-    final_certificates_count: Optional[int] = Field(
-        default=None,
-        description="Number of final acceptance certificates",
-    )
-
-    def compute_summary(self) -> "ProjectAcceptanceCertificatesData":
-        """Compute summary statistics from certificates."""
-        if self.certificates:
-            self.total_projects = len(self.certificates)
-
-            # Sum capacities
-            capacities = [c.project_capacity_kw for c in self.certificates if c.project_capacity_kw]
-            self.total_capacity_kw = sum(capacities) if capacities else None
-
-            # Count certificate types
-            self.provisional_certificates_count = sum(
-                1
-                for c in self.certificates
-                if c.certificate_type and c.certificate_type.lower() == "provisional"
-            )
-            self.final_certificates_count = sum(
-                1
-                for c in self.certificates
-                if c.certificate_type and c.certificate_type.lower() == "final"
-            )
-        return self
 
 
 class OAMContractData(BaseModel):
@@ -1000,7 +1426,7 @@ class OAMContractData(BaseModel):
 
 class ESHSESMSPoliciesData(BaseModel):
     """
-    Schema for ESHS / ESMS Policies (Section 3.1).
+    Schema for Environmental  and Social Management Plan (EMP) (Section 3.1).
 
     Environmental, Social, Health and Safety management policies
     aligned with IFC Performance Standards.
@@ -1011,9 +1437,11 @@ class ESHSESMSPoliciesData(BaseModel):
     # -------------------------------------------------------------------------
     # ESMS Aligned with IFC Performance Standards
     # -------------------------------------------------------------------------
-    esms_aligned_with_ifc_performance_standards: Optional[str] = Field(
+    esms_aligned_with_ifc_performance_standards: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Summary of how the ESMS aligns with IFC Performance Standards (max 4 lines). Include Yes/No indication and brief description.",
+        description=(
+            "Whether the ESMS aligns with IFC Performance Standards. " + YES_NO_RESPONSE_INSTRUCTION
+        ),
     )
 
     # -------------------------------------------------------------------------
@@ -1021,7 +1449,10 @@ class ESHSESMSPoliciesData(BaseModel):
     # -------------------------------------------------------------------------
     ohs_procedures_summary: Optional[str] = Field(
         default=None,
-        description="Summary of Occupational Health and Safety procedures (max 4 lines). Key safety protocols and procedures.",
+        description=(
+            "Summary of Occupational Health and Safety procedures (max 4 lines). "
+            "Key safety protocols and procedures. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
 
     # -------------------------------------------------------------------------
@@ -1029,7 +1460,11 @@ class ESHSESMSPoliciesData(BaseModel):
     # -------------------------------------------------------------------------
     hazardous_materials_handling: Optional[str] = Field(
         default=None,
-        description="Summary of hazardous materials handling procedures (max 4 lines). How hazardous materials are managed and disposed.",
+        description=(
+            "Summary of hazardous materials handling procedures (max 4 lines). "
+            "How hazardous materials are managed and disposed. "
+            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
 
     # -------------------------------------------------------------------------
@@ -1037,7 +1472,10 @@ class ESHSESMSPoliciesData(BaseModel):
     # -------------------------------------------------------------------------
     labor_procedures_workers_rights: Optional[str] = Field(
         default=None,
-        description="Summary of labor procedures and workers rights policies (max 4 lines). Worker protections and labor compliance.",
+        description=(
+            "Summary of labor procedures and workers rights policies (max 4 lines). "
+            "Worker protections and labor compliance. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
 
     # -------------------------------------------------------------------------
@@ -1045,7 +1483,10 @@ class ESHSESMSPoliciesData(BaseModel):
     # -------------------------------------------------------------------------
     waste_management_monitoring: Optional[str] = Field(
         default=None,
-        description="Summary of waste management and monitoring procedures (max 4 lines). Waste disposal and recycling practices.",
+        description=(
+            "Summary of waste management and monitoring procedures (max 4 lines). "
+            "Waste disposal and recycling practices. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
 
     # -------------------------------------------------------------------------
@@ -1053,7 +1494,11 @@ class ESHSESMSPoliciesData(BaseModel):
     # -------------------------------------------------------------------------
     resource_use_controls: Optional[str] = Field(
         default=None,
-        description="Summary of resource use controls (max 4 lines). Energy efficiency, water usage, and resource conservation measures.",
+        description=(
+            "Summary of resource use controls (max 4 lines). "
+            "Energy efficiency, water usage, and resource conservation measures. "
+            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
 
     # -------------------------------------------------------------------------
@@ -1070,6 +1515,36 @@ class ESHSESMSPoliciesData(BaseModel):
     company_name: Optional[str] = Field(
         default=None,
         description="Company name as stated in the document",
+    )
+    valid_from: Optional[str] = Field(default=None, description="Validity start date (YYYY-MM-DD)")
+    valid_to: Optional[str] = Field(default=None, description="Validity end date (YYYY-MM-DD)")
+    scope_of_application: Optional[str] = Field(
+        default=None,
+        description="Scope of application/facilities covered",
+    )
+    environmental_aspects_covered: Optional[List[str]] = Field(
+        default=None,
+        description="Environmental aspects covered (emissions, waste, water, biodiversity)",
+    )
+    social_aspects_covered: Optional[List[str]] = Field(
+        default=None,
+        description="Social aspects covered (communities, workers)",
+    )
+    monitoring_indicators: Optional[List[ESMPMonitoringIndicatorEntry]] = Field(
+        default=None,
+        description="Monitoring indicators with unit and frequency",
+    )
+    biodiversity_management_measures: Optional[str] = Field(
+        default=None,
+        description="Biodiversity management measures",
+    )
+    community_impacts_management_measures: Optional[str] = Field(
+        default=None,
+        description="Community impacts management measures",
+    )
+    climate_adaptation_measures: Optional[str] = Field(
+        default=None,
+        description="Climate adaptation measures",
     )
 
 
@@ -1131,11 +1606,14 @@ class QAQCCommissioningData(BaseModel):
     # -------------------------------------------------------------------------
     visual_inspection_summary: Optional[str] = Field(
         default=None,
-        description="Summary of visual inspection findings. Overall condition assessment.",
+        description=(
+            "Summary of visual inspection findings. Overall condition assessment. "
+            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
-    visual_inspection_passed: Optional[bool] = Field(
+    visual_inspection_passed: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether visual inspection passed (True/False)",
+        description="Whether visual inspection passed. " + YES_NO_RESPONSE_INSTRUCTION,
     )
 
     # -------------------------------------------------------------------------
@@ -1171,65 +1649,400 @@ class QAQCCommissioningData(BaseModel):
     )
 
 
-class HRManualCodeOfConductData(BaseModel):
+class IndustrialSafetyPlanData(BaseModel):
     """
-    Schema for HR Manual / Code of Conduct (Section 3.3).
+    Schema for Industrial Safety Plan (Section 3.3).
 
-    Human resources policies and code of conduct aligned with IFC standards.
+    Extract only the IFC-aligned HR practices summary required by the stakeholder mapping.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     # -------------------------------------------------------------------------
-    # IFC-aligned HR Practices Summary
+    # Industrial Safety Plan Summary
     # -------------------------------------------------------------------------
     ifc_aligned_hr_practices_summary: Optional[str] = Field(
         default=None,
-        description="Summary of IFC-aligned HR practices. Key HR policies that align with international standards.",
+        description=(
+            "Summary of IFC-aligned HR practices described in the Industrial Safety Plan. "
+            "Return the summary in the exact same language as the source document. "
+            "Do not translate, normalize, or rewrite it into another language."
+        ),
     )
 
-    # -------------------------------------------------------------------------
-    # Key Policy Areas (extracted summaries)
-    # -------------------------------------------------------------------------
-    non_discrimination_policy: Optional[str] = Field(
+
+class EnvironmentalLicenceEIAData(BaseModel):
+    """Schema for Environmental Licence / EIA (Section 2.4)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    document_language: Optional[DocumentLanguageAnswer] = Field(
         default=None,
-        description="Summary of non-discrimination and equal opportunity policies",
-    )
-    grievance_mechanism: Optional[str] = Field(
-        default=None,
-        description="Summary of grievance mechanism and complaint procedures",
-    )
-    working_conditions: Optional[str] = Field(
-        default=None,
-        description="Summary of working conditions policies (hours, overtime, leave)",
-    )
-    child_labor_policy: Optional[str] = Field(
-        default=None,
-        description="Summary of child labor prevention policy",
-    )
-    forced_labor_policy: Optional[str] = Field(
-        default=None,
-        description="Summary of forced labor prevention policy",
-    )
-    health_safety_policy: Optional[str] = Field(
-        default=None,
-        description="Summary of occupational health and safety policies for workers",
+        description=(
+            "Primary language of the source document. "
+            "Return exactly one of: Spanish, English, Other."
+        ),
     )
 
-    # -------------------------------------------------------------------------
-    # Document Metadata
-    # -------------------------------------------------------------------------
-    document_date: Optional[str] = Field(
+    issuing_authority: Optional[str] = Field(
         default=None,
-        description="Date of the HR manual or code of conduct (YYYY-MM-DD if available)",
+        description=(
+            "Issuing authority. Extract exactly as written in the document. "
+            "Preserve the original document language."
+        ),
     )
-    document_version: Optional[str] = Field(
+    license_number: Optional[str] = Field(
         default=None,
-        description="Version number or revision",
+        description=("License number. Extract exactly as written in the document."),
     )
-    company_name: Optional[str] = Field(
+    issuing_date: Optional[str] = Field(
         default=None,
-        description="Company name as stated in the document",
+        description=("Issuing date in YYYY-MM-DD format."),
+    )
+    expiry_date: Optional[str] = Field(
+        default=None,
+        description=("Expiry date in YYYY-MM-DD format."),
+    )
+
+    sensitive_habitats_present: Optional[YesNoAnswer] = Field(
+        default=None,
+        description=(
+            "Whether sensitive habitats are present. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
+    )
+    sensitive_habitats_description: Optional[str] = Field(
+        default=None,
+        description=(
+            "Sensitive habitats description in 2-4 lines. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
+    )
+
+    biodiversity_impacts_identified: Optional[YesNoAnswer] = Field(
+        default=None,
+        description=(
+            "Whether biodiversity impacts are identified. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
+    )
+    biodiversity_impacts_summary: Optional[str] = Field(
+        default=None,
+        description=(
+            "Biodiversity impacts summary in 2-4 lines. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
+    )
+
+    ecosystem_services_impacted: Optional[YesNoAnswer] = Field(
+        default=None,
+        description=(
+            "Whether ecosystem services are impacted. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
+    )
+    ecosystem_services_description: Optional[str] = Field(
+        default=None,
+        description=(
+            "Ecosystem services description in 2-4 lines. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
+    )
+
+    mitigation_measures_summary: Optional[str] = Field(
+        default=None,
+        description=(
+            "Mitigation measures summary in 2-4 lines. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
+    )
+
+    neighboring_populations_present: Optional[YesNoAnswer] = Field(
+        default=None,
+        description=(
+            "Whether neighboring populations are present. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
+    )
+    neighboring_populations_description: Optional[str] = Field(
+        default=None,
+        description=(
+            "Neighboring populations description in 2-4 lines. "
+            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
+    )
+
+    critical_infrastructure_nearby: Optional[YesNoAnswer] = Field(
+        default=None,
+        description=(
+            "Whether critical infrastructure is nearby. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
+    )
+    critical_infrastructure_description: Optional[str] = Field(
+        default=None,
+        description=(
+            "Critical infrastructure description in 2-4 lines. "
+            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
+    )
+
+    cultural_heritage_assets_present: Optional[YesNoAnswer] = Field(
+        default=None,
+        description=(
+            "Whether cultural heritage assets are present. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
+    )
+    cultural_heritage_description: Optional[str] = Field(
+        default=None,
+        description=(
+            "Cultural heritage description in 2-4 lines. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
+    )
+    cultural_heritage_protection_measures: Optional[str] = Field(
+        default=None,
+        description=(
+            "Cultural heritage protection measures in 2-4 lines. "
+            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
+    )
+
+    public_consultation_required: Optional[YesNoAnswer] = Field(
+        default=None,
+        description=(
+            "Whether public consultation is required. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
+    )
+    public_consultation_summary: Optional[str] = Field(
+        default=None,
+        description=(
+            "Public consultation summary in 2-4 lines. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
+    )
+
+
+class ESMPMonitoringIndicatorEntry(BaseModel):
+    """Monitoring indicator entry in ESMP documents."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    indicator: Optional[str] = Field(default=None, description="Monitoring indicator name")
+    unit: Optional[str] = Field(default=None, description="Indicator unit")
+    frequency: Optional[str] = Field(default=None, description="Monitoring frequency")
+
+
+class EmergencyResponseSecurityPlanData(BaseModel):
+    """Schema for Emergency Response & Security Plan (Section 2.6)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    last_update_date: Optional[str] = Field(
+        default=None,
+        description="Last update date (YYYY-MM-DD)",
+    )
+    risks_covered: Optional[List[str]] = Field(
+        default=None,
+        description="Risks covered (e.g., flood, fire, drought)",
+    )
+    climate_extreme_events_covered: Optional[YesNoAnswer] = Field(
+        default=None,
+        description="Whether climate extreme events are covered. " + YES_NO_RESPONSE_INSTRUCTION,
+    )
+    climate_adaptation_actions: Optional[str] = Field(
+        default=None,
+        description="Climate adaptation actions",
+    )
+    security_risks_covered: Optional[YesNoAnswer] = Field(
+        default=None,
+        description="Whether security risks are covered. " + YES_NO_RESPONSE_INSTRUCTION,
+    )
+    security_arrangements: Optional[str] = Field(
+        default=None,
+        description="Security arrangements",
+    )
+    access_to_basic_resources_during_crisis: Optional[str] = Field(
+        default=None,
+        description="Access to basic resources during crisis",
+    )
+    emergency_response_protocols: Optional[str] = Field(
+        default=None,
+        description="Emergency response protocols",
+    )
+    coordination_with_authorities: Optional[YesNoAnswer] = Field(
+        default=None,
+        description="Whether there is coordination with authorities. "
+        + YES_NO_RESPONSE_INSTRUCTION,
+    )
+
+
+class LandTitleDocumentEntry(BaseModel):
+    """Land title document entry for site legal status."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    document_type: Optional[str] = Field(default=None, description="Document type")
+    document_number: Optional[str] = Field(default=None, description="Document number")
+    document_date: Optional[str] = Field(default=None, description="Document date (YYYY-MM-DD)")
+
+
+class LeaseContractEntry(BaseModel):
+    """Lease contract entry for site legal status."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    lessor: Optional[str] = Field(default=None, description="Lessor name")
+    term: Optional[str] = Field(default=None, description="Lease term")
+    expiry: Optional[str] = Field(default=None, description="Lease expiry (YYYY-MM-DD)")
+
+
+class SiteLegalStatusSummaryData(BaseModel):
+    """Schema for Site Legal Status Summary (Section 2.7)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    land_tenure_status: Optional[str] = Field(
+        default=None,
+        description="Land tenure status (owned/leased/concession)",
+    )
+    number_of_plots: Optional[int] = Field(default=None, description="Number of plots")
+    land_title_documents_listed: Optional[List[LandTitleDocumentEntry]] = Field(
+        default=None,
+        description="Land title documents (type, number, date)",
+    )
+    lease_contracts_listed: Optional[List[LeaseContractEntry]] = Field(
+        default=None,
+        description="Lease contracts (lessor, term, expiry)",
+    )
+    collective_rights_indigenous_claims: Optional[YesNoAnswer] = Field(
+        default=None,
+        description=(
+            "Whether collective rights or indigenous claims exist. " + YES_NO_RESPONSE_INSTRUCTION
+        ),
+    )
+    collective_rights_description: Optional[str] = Field(
+        default=None,
+        description="Collective rights description",
+    )
+    known_property_disputes: Optional[YesNoAnswer] = Field(
+        default=None,
+        description="Whether known property disputes exist. " + YES_NO_RESPONSE_INSTRUCTION,
+    )
+    property_disputes_summary: Optional[str] = Field(
+        default=None,
+        description=("Property disputes summary. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION),
+    )
+    expropriation_risk_identified: Optional[YesNoAnswer] = Field(
+        default=None,
+        description="Whether expropriation risk is identified. " + YES_NO_RESPONSE_INSTRUCTION,
+    )
+    expropriation_risk_description: Optional[str] = Field(
+        default=None,
+        description="Expropriation risk description",
+    )
+
+
+class ExistingMortgageEntry(BaseModel):
+    """Existing mortgage entry for liens certificates."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    bank: Optional[str] = Field(default=None, description="Bank name")
+    amount: Optional[float] = Field(default=None, description="Mortgage amount")
+    date: Optional[str] = Field(default=None, description="Mortgage date (YYYY-MM-DD)")
+
+
+class LiensCertificateData(BaseModel):
+    """Schema for Liens Certificate (Section 2.8)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    existing_mortgages: Optional[List[ExistingMortgageEntry]] = Field(
+        default=None,
+        description="Existing mortgages (bank, amount, date)",
+    )
+    need_for_lender_consent: Optional[YesNoAnswer] = Field(
+        default=None,
+        description="Whether lender consent is needed. " + YES_NO_RESPONSE_INSTRUCTION,
+    )
+
+
+class NonOverlapProtectedAreasCertificateData(BaseModel):
+    """Schema for Non-overlap with Protected Areas Certificate (Section 2.10)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    protected_area_presence: Optional[YesNoAnswer] = Field(
+        default=None,
+        description="Whether protected area presence is indicated. " + YES_NO_RESPONSE_INSTRUCTION,
+    )
+    geographic_reference: Optional[str] = Field(
+        default=None,
+        description="Geographic reference (coordinates or location reference)",
+    )
+    issuing_authority: Optional[str] = Field(default=None, description="Issuing authority")
+    date_of_issuance: Optional[str] = Field(
+        default=None,
+        description="Date of issuance (YYYY-MM-DD)",
+    )
+    validity_date: Optional[str] = Field(
+        default=None,
+        description="Validity date (YYYY-MM-DD)",
+    )
+
+
+class HRPolicyCodeOfConductData(BaseModel):
+    """Schema for HR Policy / Code of Conduct (Section 2.11)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    human_rights_policy_exists: Optional[YesNoAnswer] = Field(
+        default=None,
+        description=(
+            "Whether a human rights policy exists. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
+    )
+    labor_standards_policy_exists: Optional[YesNoAnswer] = Field(
+        default=None,
+        description=(
+            "Whether a labor standards policy exists. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
+    )
+    prohibition_of_forced_labor: Optional[YesNoAnswer] = Field(
+        default=None,
+        description=(
+            "Whether forced labor is explicitly prohibited. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
+    )
+    prohibition_of_child_labor: Optional[YesNoAnswer] = Field(
+        default=None,
+        description=(
+            "Whether child labor is explicitly prohibited. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
+    )
+    non_discrimination_policy: Optional[YesNoAnswer] = Field(
+        default=None,
+        description=(
+            "Whether a non-discrimination policy exists. "
+            "Return exactly one of: Yes, No. "
+            "Do not return true/false or any other variant."
+        ),
+    )
+    supplier_labor_requirements: Optional[str] = Field(
+        default=None,
+        description="Supplier labor requirements (extracted text)",
     )
 
 
@@ -1255,9 +2068,11 @@ class ElectricalUtilityFeasibilityReportData(BaseModel):
         default=None,
         description="Capacity requested in kW or MW (convert to kW if in MW)",
     )
-    feasibility_issued: Optional[bool] = Field(
+    feasibility_issued: Optional[YesNoAnswer] = Field(
         default=None,
-        description="Whether feasibility has been issued/approved (Yes/No)",
+        description=(
+            "Whether feasibility has been issued or approved. " + YES_NO_RESPONSE_INSTRUCTION
+        ),
     )
     available_hosting_capacity_kw: Optional[float] = Field(
         default=None,
@@ -1331,92 +2146,6 @@ class ElectricalUtilityFeasibilityReportData(BaseModel):
         return self
 
 
-class ConstructionPermitData(BaseModel):
-    """
-    Schema for Construction Permit.
-
-    Building or construction permit authorizing project construction.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    permit_number: Optional[str] = Field(
-        default=None,
-        description="Permit number or reference ID",
-    )
-    issue_date: Optional[str] = Field(
-        default=None,
-        description="Date the permit was issued (YYYY-MM-DD)",
-    )
-    expiry_date: Optional[str] = Field(
-        default=None,
-        description="Permit expiry date (YYYY-MM-DD)",
-    )
-    issuing_authority: Optional[str] = Field(
-        default=None,
-        description="Authority that issued the permit (e.g., municipality name)",
-    )
-    project_name: Optional[str] = Field(
-        default=None,
-        description="Project name as stated in the permit",
-    )
-    project_address: Optional[str] = Field(
-        default=None,
-        description="Project location/address",
-    )
-    permitted_capacity_kw: Optional[float] = Field(
-        default=None,
-        description="Permitted installation capacity in kW",
-    )
-    permit_status: Optional[str] = Field(
-        default=None,
-        description="Current status of the permit (Active/Expired/Pending)",
-    )
-
-
-class EnvironmentalPermitData(BaseModel):
-    """
-    Schema for Environmental Permit.
-
-    Environmental impact assessment or environmental authorization.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    permit_number: Optional[str] = Field(
-        default=None,
-        description="Environmental permit number or reference",
-    )
-    issue_date: Optional[str] = Field(
-        default=None,
-        description="Date the permit was issued (YYYY-MM-DD)",
-    )
-    expiry_date: Optional[str] = Field(
-        default=None,
-        description="Permit expiry date (YYYY-MM-DD)",
-    )
-    issuing_authority: Optional[str] = Field(
-        default=None,
-        description="Environmental authority that issued the permit",
-    )
-    environmental_category: Optional[str] = Field(
-        default=None,
-        description="Environmental impact category (e.g., Category I, II, III)",
-    )
-    project_name: Optional[str] = Field(
-        default=None,
-        description="Project name as stated in the permit",
-    )
-    conditions_summary: Optional[str] = Field(
-        default=None,
-        description="Summary of key environmental conditions or requirements",
-    )
-    permit_status: Optional[str] = Field(
-        default=None,
-        description="Current status of the permit (Active/Expired/Pending)",
-    )
-
-
 class LandUsePermitData(BaseModel):
     """
     Schema for Land Use Permit.
@@ -1462,56 +2191,17 @@ class LandUsePermitData(BaseModel):
         default=None,
         description="Current status of the permit (Active/Expired/Pending)",
     )
-
-
-class InterconnectionAgreementData(BaseModel):
-    """
-    Schema for Interconnection Agreement.
-
-    Grid interconnection agreement with the utility company.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    agreement_number: Optional[str] = Field(
+    municipality_issuing_body: Optional[str] = Field(
         default=None,
-        description="Agreement number or contract reference",
+        description="Municipality issuing body",
     )
-    execution_date: Optional[str] = Field(
+    allowed_land_use_category: Optional[str] = Field(
         default=None,
-        description="Date the agreement was executed/signed (YYYY-MM-DD)",
+        description="Allowed land use category",
     )
-    effective_date: Optional[str] = Field(
+    validity_period: Optional[str] = Field(
         default=None,
-        description="Date the agreement becomes effective (YYYY-MM-DD)",
-    )
-    expiry_date: Optional[str] = Field(
-        default=None,
-        description="Agreement expiry date (YYYY-MM-DD)",
-    )
-    utility_company_name: Optional[str] = Field(
-        default=None,
-        description="Name of the utility company",
-    )
-    project_name: Optional[str] = Field(
-        default=None,
-        description="Project name as stated in the agreement",
-    )
-    interconnection_capacity_kw: Optional[float] = Field(
-        default=None,
-        description="Agreed interconnection capacity in kW",
-    )
-    voltage_level_kv: Optional[float] = Field(
-        default=None,
-        description="Interconnection voltage level in kV",
-    )
-    connection_point: Optional[str] = Field(
-        default=None,
-        description="Point of interconnection or substation",
-    )
-    agreement_status: Optional[str] = Field(
-        default=None,
-        description="Current status of the agreement (Active/Expired/Pending)",
+        description="Validity period (months/years)",
     )
 
 
@@ -1576,14 +2266,44 @@ class ESGData(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    eshs_esms_policies: Optional[ESHSESMSPoliciesData] = Field(
+    ENVIRONMENTAL_AND_SOCIAL_MANAGEMENT_PLAN: Optional[ESHSESMSPoliciesData] = Field(
         default=None, description="ESHS/ESMS policies data (Section 3.1)"
     )
     qaqc_commissioning: Optional[QAQCCommissioningData] = Field(
         default=None, description="QA/QC and commissioning data (Section 3.2)"
     )
-    hr_manual_code_of_conduct: Optional[HRManualCodeOfConductData] = Field(
-        default=None, description="HR manual and code of conduct data (Section 3.3)"
+    INDUSTRIAL_SAFETY_PLAN: Optional[IndustrialSafetyPlanData] = Field(
+        default=None, description="Industrial safety plan data (Section 3.3)"
+    )
+    environmental_licence_eia: Optional[EnvironmentalLicenceEIAData] = Field(
+        default=None,
+        description="Environmental Licence / EIA data (Section 2.4)",
+    )
+    emergency_response_security_plan: Optional[EmergencyResponseSecurityPlanData] = Field(
+        default=None,
+        description="Emergency Response & Security Plan data (Section 2.6)",
+    )
+    site_legal_status_summary: Optional[SiteLegalStatusSummaryData] = Field(
+        default=None,
+        description="Site Legal Status Summary data (Section 2.7)",
+    )
+    liens_certificate: Optional[LiensCertificateData] = Field(
+        default=None,
+        description="Liens Certificate data (Section 2.8)",
+    )
+    non_overlap_with_protected_areas_certificate: Optional[
+        NonOverlapProtectedAreasCertificateData
+    ] = Field(
+        default=None,
+        description="Non-overlap with Protected Areas Certificate data (Section 2.10)",
+    )
+    hr_policy_code_of_conduct: Optional[HRPolicyCodeOfConductData] = Field(
+        default=None,
+        description="HR Policy / Code of Conduct data (Section 2.11)",
+    )
+    land_use_permit: Optional[LandUsePermitData] = Field(
+        default=None,
+        description="Land use permit data (Section 2.9)",
     )
 
 
@@ -1594,18 +2314,6 @@ class PermitsData(BaseModel):
 
     electrical_utility_feasibility: Optional[ElectricalUtilityFeasibilityReportData] = Field(
         default=None, description="Electrical utility feasibility report data (Section 2.1)"
-    )
-    construction_permit: Optional[ConstructionPermitData] = Field(
-        default=None, description="Construction permit data"
-    )
-    environmental_permit: Optional[EnvironmentalPermitData] = Field(
-        default=None, description="Environmental permit data"
-    )
-    land_use_permit: Optional[LandUsePermitData] = Field(
-        default=None, description="Land use permit data"
-    )
-    interconnection_agreement: Optional[InterconnectionAgreementData] = Field(
-        default=None, description="Interconnection agreement data"
     )
 
 
@@ -1620,7 +2328,7 @@ class ClassificationResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     top_level_category: TopLevelCategory = Field(
-        description="The top-level category (Company Information, Company Financials, Technical, etc.)"
+        description="The top-level category (Company Information, Company Financials, Financial, Technical, etc.)"
     )
     document_type: DocumentType = Field(
         description="The specific document type within the top-level category"
@@ -1643,7 +2351,7 @@ PYDANTIC_MODELS: dict[DocumentType, Type[BaseModel]] = {
     DocumentType.CERTIFICATE_OF_LEGAL_EXISTENCE: LegalInformation,
     DocumentType.SHAREHOLDERS_DECLARATION: ShareholderStructure,
     DocumentType.LEGAL_REPRESENTATIVE_APPOINTMENT: LegalRepresentation,
-    DocumentType.ENERGY_CONSUMPTION_BILLS: EnergyConsumptionBillsData,
+    DocumentType.ENERGY_CONSUMPTION_BILLS: EnergyConsumptionBillsCollection,
     # Company Financials
     DocumentType.FINANCIAL_STATEMENTS: FinancialStatementsData,
     DocumentType.INCOME_TAX_FILINGS: IncomeTaxFilingsData,
@@ -1654,15 +2362,18 @@ PYDANTIC_MODELS: dict[DocumentType, Type[BaseModel]] = {
     DocumentType.PROJECT_ACCEPTANCE_CERTIFICATES: ProjectAcceptanceCertificatesData,
     DocumentType.OAM_CONTRACTS: OAMContractData,
     # ESG
-    DocumentType.ESHS_ESMS_POLICIES: ESHSESMSPoliciesData,
+    DocumentType.ENVIRONMENTAL_AND_SOCIAL_MANAGEMENT_PLAN: ESHSESMSPoliciesData,
     DocumentType.QAQC_COMMISSIONING_PROCEDURES: QAQCCommissioningData,
-    DocumentType.HR_MANUAL_CODE_OF_CONDUCT: HRManualCodeOfConductData,
+    DocumentType.INDUSTRIAL_SAFETY_PLAN: IndustrialSafetyPlanData,
+    DocumentType.ENVIRONMENTAL_LICENCE_EIA: EnvironmentalLicenceEIAData,
+    DocumentType.EMERGENCY_RESPONSE_SECURITY_PLAN: EmergencyResponseSecurityPlanData,
+    DocumentType.SITE_LEGAL_STATUS_SUMMARY: SiteLegalStatusSummaryData,
+    DocumentType.LIENS_CERTIFICATE: LiensCertificateData,
+    DocumentType.NON_OVERLAP_WITH_PROTECTED_AREAS_CERTIFICATE: NonOverlapProtectedAreasCertificateData,
+    DocumentType.HR_POLICY_CODE_OF_CONDUCT: HRPolicyCodeOfConductData,
+    DocumentType.LAND_USE_PERMIT: LandUsePermitData,
     # Permits
     DocumentType.ELECTRICAL_UTILITY_FEASIBILITY_REPORT: ElectricalUtilityFeasibilityReportData,
-    DocumentType.CONSTRUCTION_PERMIT: ConstructionPermitData,
-    DocumentType.ENVIRONMENTAL_PERMIT: EnvironmentalPermitData,
-    DocumentType.LAND_USE_PERMIT: LandUsePermitData,
-    DocumentType.INTERCONNECTION_AGREEMENT: InterconnectionAgreementData,
 }
 
 # Add Technical + Uncategorized schemas from landing_ai_poc_sdk2

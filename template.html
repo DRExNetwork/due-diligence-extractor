@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8" />
+  <meta http-equiv="Content-Style-Type" content="text/css" />
+  <title>Solar Energy Proposal</title>
+  <link rel="preload"
+    href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&display=swap"
+    as="style" onload="this.rel='stylesheet'">
+  <style type="text/css">
+    * {
+      font-family: 'Montserrat', sans-serif;
+      box-sizing: border-box;
+    }
+
+    @page {
+      size: auto;
+      margin: 0;
+    }
+
+    body {
+      width: 21cm;
+      margin: 0 auto;
+      padding: 0;
+      font-size: 12px;
+    }
+
+    p {
+      margin: 0;
+    }
+
+    .page {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .header {
+      width: 1193px;
+      height: 173px;
+      padding: 0 84.5px;
+      background: #E0E0E0;
+      display: flex;
+      align-items: center;
+    }
+
+    .header__content {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .content {
+      width: 1024px;
+      padding: 48px 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 32px;
+    }
+
+    .card {
+      width: 100%;
+      background: #FFFFFF;
+      border-radius: 14px;
+      outline: 1px rgba(0, 0, 0, 0.10) solid;
+      outline-offset: -1px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .stack-8 {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .stack-16 {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .stack-24 {
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .stack-row {
+      display: flex;
+      flex-direction: row;
+      justify-content: space-between;
+    }
+
+    .flex-space-between {
+      justify-content: space-between;
+    }
+
+    .title-xl {
+      color: #000000;
+      font-size: 36px;
+      font-weight: 700;
+      line-height: 40px;
+      letter-spacing: 0.37px;
+    }
+
+    .subtitle-lg {
+      color: #000000;
+      font-size: 20px;
+      font-weight: 400;
+      line-height: 28px;
+    }
+
+    .section-title {
+      color: #0A0A0A;
+      font-size: 16px;
+      font-weight: 600;
+      line-height: 28px;
+      letter-spacing: 0.15px;
+    }
+
+    .section-title-lg {
+      color: #0A0A0A;
+      font-size: 24px;
+      font-weight: 500;
+      line-height: 32px;
+      letter-spacing: 0.07px;
+      font-family: Inter, 'Montserrat', sans-serif;
+    }
+
+    .label-14 {
+      color: #0F172B;
+      font-size: 14px;
+      font-weight: 500;
+      line-height: 21.98px;
+      letter-spacing: 0.10px;
+    }
+
+    .label-14-strong {
+      color: #0F172B;
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 21.98px;
+      letter-spacing: 0.10px;
+    }
+
+    .body-16 {
+      color: #314158;
+      font-size: 16px;
+      font-weight: 400;
+      line-height: 26px;
+      font-family: Inter, 'Montserrat', sans-serif;
+    }
+
+    .body-12 {
+      color: #0A0A0A;
+      font-size: 12px;
+      font-weight: 400;
+      line-height: 17.16px;
+      letter-spacing: 0.30px;
+    }
+
+    .body-12-muted {
+      color: #314158;
+      font-size: 12px;
+      font-weight: 400;
+      line-height: 17.16px;
+      letter-spacing: 0.30px;
+    }
+
+    .body-12-slate {
+      color: #45556C;
+      font-size: 12px;
+      font-weight: 400;
+      line-height: 17.16px;
+      letter-spacing: 0.30px;
+    }
+
+    .body-12-slate-strong {
+      color: #45556C;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 17.16px;
+      letter-spacing: 0.30px;
+    }
+
+    .body-12-strong {
+      color: #0A0A0A;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 17.16px;
+      letter-spacing: 0.30px;
+    }
+
+    .value-16 {
+      color: #0A0A0A;
+      font-size: 16px;
+      font-weight: 700;
+      line-height: 24px;
+      letter-spacing: 0.15px;
+    }
+
+    .value-14 {
+      color: #0A0A0A;
+      font-size: 14px;
+      font-weight: 400;
+      line-height: 20px;
+      font-family: Inter, 'Montserrat', sans-serif;
+    }
+
+    .table {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .table-row {
+      display: flex;
+      border-bottom: 1px rgba(0, 0, 0, 0.10) solid;
+    }
+
+    .table-row:last-child {
+      border-bottom: none;
+    }
+
+    .table-row--header .cell {
+      padding: 10px 8px;
+    }
+
+    .cell {
+      padding: 9px 8px;
+      display: flex;
+      align-items: center;
+    }
+
+    .cell--top {
+      align-items: flex-start;
+    }
+
+    .cell-50 {
+      flex: 0 0 50%;
+    }
+
+    .cell-36 {
+      flex: 0 0 36%;
+    }
+
+    .cell-64 {
+      flex: 0 0 64%;
+    }
+
+    .cell-right {
+      justify-content: flex-end;
+      text-align: right;
+    }
+
+    .kpi-grid {
+      display: flex;
+      gap: 24px;
+    }
+
+    .kpi-card {
+      width: 293px;
+      height: 108px;
+      padding: 24px;
+      background: #F1F5F9;
+      border-radius: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .kpi-card--narrow {
+      width: 292px;
+    }
+
+    .table-narrow {
+      width: 451px;
+    }
+
+    .row-muted {
+      background: #F1F5F9;
+    }
+
+    .spec-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .spec-row {
+      display: flex;
+      gap: 8px;
+    }
+
+    .spec-label {
+      color: #45556C;
+      font-size: 12px;
+      font-weight: 400;
+      line-height: 17.16px;
+      letter-spacing: 0.30px;
+    }
+
+    .spec-value {
+      color: #0A0A0A;
+      font-size: 12px;
+      font-weight: 400;
+      line-height: 17.16px;
+      letter-spacing: 0.30px;
+    }
+
+    .assumptions {
+      padding: 24px;
+      background: #F8FAFC;
+      border-radius: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .kv-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .divider {
+      height: 1px;
+      background: rgba(0, 0, 0, 0.10);
+    }
+
+    .callout {
+      padding: 16px 24px;
+      background: #EFF6FF;
+      border-radius: 4px;
+      border-left: 4px #2B7FFF solid;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .timeline {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .timeline-row {
+      display: flex;
+      align-items: center;
+      gap: 9px;
+    }
+
+    .badge {
+      width: 92px;
+      height: 40px;
+      background: #0F172B;
+      border-radius: 4px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .badge-text {
+      color: #FFFFFF;
+      font-size: 12px;
+      font-weight: 700;
+      line-height: 17.16px;
+      letter-spacing: 0.30px;
+    }
+
+    .esg-list {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+    }
+
+    .esg-item {
+      background: #F0FDF4;
+      border-radius: 10px;
+      padding: 16px;
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+
+    .esg-check {
+      color: #00A63E;
+      font-size: 20px;
+      line-height: 28px;
+      font-family: Inter, 'Montserrat', sans-serif;
+    }
+
+    .summary {
+      background: #0F172B;
+      border-radius: 14px;
+      outline: 1px #1D293D solid;
+      outline-offset: -1px;
+      padding: 24px;
+      color: #F1F5F9;
+      display: flex;
+      align-items: center;
+    }
+
+    .summary-text {
+      color: #F1F5F9;
+      font-size: 12px;
+      font-weight: 400;
+      line-height: 17.16px;
+      letter-spacing: 0.30px;
+    }
+
+    .summary-text strong {
+      font-weight: 700;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="page">
+    <header class="header">
+      <div class="header__content">
+        <div class="title-xl">Executive Investment Summary</div>
+        <div class="subtitle-lg">Proyecto Solar Biogemar - Santa Elena</div>
+      </div>
+    </header>
+
+    <main class="content">
+      <section class="card">
+        <div class="section-title">1. Resumen del Proyecto y Oportunidad de Inversión</div>
+        <div class="stack-24">
+          <p class="body-16">Este documento presenta una oportunidad de inversión en Biogemar - Santa Elena, un proyecto
+            de energía solar fotovoltaica diseñado para suministrar energía limpia y competitiva a la industria vital de
+            cultivo y procesamiento de camarón de Ecuador. El proyecto se posiciona como una inversión de alto retorno y
+            riesgo mitigado, anclada por un marco regulatorio favorable bajo la Regulación 005-40 para Generación
+            Distribuida y una creciente demanda de soluciones energéticas sostenibles. Su diseño técnico optimizado y
+            sólida estructura financiera lo convierten en una propuesta estratégica para inversionistas que buscan
+            participar en la transición energética de la región a través de un sector industrial clave.</p>
+
+          <div class="stack-16">
+            <div class="label-14">Métricas Clave del Proyecto</div>
+            <div class="table">
+              <div class="table-row table-row--header">
+                <div class="cell cell-50"><span class="body-12-strong">Atributo Clave</span></div>
+                <div class="cell cell-50"><span class="body-12-strong">Valor</span></div>
+              </div>
+              <div class="table-row">
+                <div class="cell cell-50"><span class="body-12">Nombre del Proyecto</span></div>
+                <div class="cell cell-50"><span class="body-12">Biogemar - Santa Elena</span></div>
+              </div>
+              <div class="table-row">
+                <div class="cell cell-50"><span class="body-12">Ubicación</span></div>
+                <div class="cell cell-50"><span class="body-12">-02°06'03", -080°44'47"</span></div>
+              </div>
+              <div class="table-row">
+                <div class="cell cell-50"><span class="body-12">Potencia DC Total</span></div>
+                <div class="cell cell-50"><span class="body-12">5 MWp</span></div>
+              </div>
+              <div class="table-row">
+                <div class="cell cell-50"><span class="body-12">Potencia AC Total</span></div>
+                <div class="cell cell-50"><span class="body-12">4 MWac</span></div>
+              </div>
+              <div class="table-row">
+                <div class="cell cell-50"><span class="body-12">Producción Anual de Energía</span></div>
+                <div class="cell cell-50"><span class="body-12">6,932.8 MWh/año</span></div>
+              </div>
+              <div class="table-row">
+                <div class="cell cell-50"><span class="body-12">Ratio de Rendimiento (PR)</span></div>
+                <div class="cell cell-50"><span class="body-12">73.91%</span></div>
+              </div>
+              <div class="table-row">
+                <div class="cell cell-50"><span class="body-12">Ratio DC/AC</span></div>
+                <div class="cell cell-50"><span class="body-12">1.25</span></div>
+              </div>
+            </div>
+          </div>
+
+          <p class="body-12">Estos sólidos parámetros técnicos sientan las bases del atractivo perfil financiero del
+            proyecto, asegurando un rendimiento energético predecible y flujos de caja estables, optimizados mediante un
+            ratio DC/AC de 1.25 diseñado para maximizar la captura de energía durante períodos de menor irradiación.</p>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-title">2. Aspectos Financieros Clave</div>
+        <div class="stack-24">
+          <p class="body-12">La viabilidad del proyecto se demuestra a través de indicadores financieros robustos que
+            aseguran retornos atractivos y una capacidad consistente para cumplir con sus obligaciones de deuda. Las
+            proyecciones han sido modeladas para ofrecer una visión clara de la rentabilidad potencial y la seguridad de
+            la inversión.</p>
+
+          <div class="kpi-grid">
+            <div class="kpi-card">
+              <div class="body-12-slate-strong">Inversión Total (CAPEX)</div>
+              <div class="value-16">USD 110,000</div>
+              <div class="body-12">(incl. IVA)</div>
+            </div>
+            <div class="kpi-card kpi-card--narrow">
+              <div class="body-12-slate-strong">TIR sin Apalancamiento</div>
+              <div class="value-16">11.0%</div>
+            </div>
+            <div class="kpi-card">
+              <div class="body-12-slate-strong">Cobertura de Servicio de Deuda</div>
+              <div class="value-16">1.20x</div>
+            </div>
+          </div>
+
+          <p class="body-12">La TIR sin apalancamiento del 11.0% y una cobertura de servicio de deuda de 1.20x
+            demuestran un perfil financiero resiliente, capaz de resistir fluctuaciones del mercado mientras proporciona
+            retornos consistentes y una cómoda cobertura del servicio de deuda. La estructura de capital propuesta está
+            diseñada para optimizar el retorno para los inversionistas en capital mientras mantiene un apalancamiento
+            prudente.</p>
+
+          <div class="stack-row">
+
+            <div class="stack-16">
+              <div class="label-14-strong">Fuentes de Capital</div>
+              <div class="table table-narrow">
+                <div class="table-row">
+                  <div class="cell"><span class="body-12">Capital Propio</span></div>
+                  <div class="cell cell-right"><span class="value-14">USD 30,000</span></div>
+                </div>
+                <div class="table-row">
+                  <div class="cell"><span class="body-12">Deuda</span></div>
+                  <div class="cell cell-right"><span class="value-14">USD 70,000</span></div>
+                </div>
+                <div class="table-row row-muted">
+                  <div class="cell"><span class="body-12">Total Fuentes</span></div>
+                  <div class="cell cell-right"><span class="value-14">USD 100,000</span></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="stack-16 flex-space-between">
+              <div class="label-14-strong">Usos de Capital</div>
+              <div class="table table-narrow">
+                <div class="table-row">
+                  <div class="cell"><span class="body-12">Costos del Proyecto</span></div>
+                  <div class="cell cell-right"><span class="value-14">USD 100,000</span></div>
+                </div>
+                <div class="table-row row-muted">
+                  <div class="cell"><span class="body-12">Total Usos</span></div>
+                  <div class="cell cell-right"><span class="value-14">USD 100,000</span></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <p class="body-12">Esta fortaleza financiera está respaldada por un diseño técnico riguroso y la selección de
+            equipos de primer nivel, detallados a continuación, que garantizan el rendimiento proyectado.</p>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-title">3. Especificaciones Técnicas y Equipamiento</div>
+        <div class="stack-24">
+          <p class="body-12-muted">La selección de componentes de fabricantes de primer nivel asegura el éxito
+            operacional y longevidad del proyecto, mitigando riesgos técnicos y asegurando que la planta opere de
+            acuerdo con las proyecciones de generación durante toda su vida útil.</p>
+
+          <div class="stack-16">
+            <div class="label-14">Especificaciones del Equipamiento</div>
+            <div class="table">
+              <div class="table-row table-row--header">
+                <div class="cell cell-36"><span class="label-14">Componente</span></div>
+                <div class="cell cell-64"><span class="label-14">Especificación</span></div>
+              </div>
+              <div class="table-row">
+                <div class="cell cell-36 cell--top"><span class="body-12">Módulos Solares</span></div>
+                <div class="cell cell-64 cell--top">
+                  <div class="spec-list">
+                    <div class="spec-row"><span class="spec-label">Marca:</span><span class="spec-value">JA Solar</span>
+                    </div>
+                    <div class="spec-row"><span class="spec-label">Modelo:</span><span
+                        class="spec-value">JAM72S30-540/MR</span></div>
+                    <div class="spec-row"><span class="spec-label">Garantía Técnica:</span><span class="spec-value">12
+                        años</span></div>
+                    <div class="spec-row"><span class="spec-label">Garantía Lineal:</span><span class="spec-value">25
+                        años</span></div>
+                  </div>
+                </div>
+              </div>
+              <div class="table-row">
+                <div class="cell cell-36 cell--top"><span class="body-12">Inversores</span></div>
+                <div class="cell cell-64 cell--top">
+                  <div class="spec-list">
+                    <div class="spec-row"><span class="spec-label">Marca:</span><span class="spec-value">Huawei</span>
+                    </div>
+                    <div class="spec-row"><span class="spec-label">Modelo:</span><span
+                        class="spec-value">SUN2000-100KTL-M1</span></div>
+                    <div class="spec-row"><span class="spec-label">Garantía Técnica:</span><span class="spec-value">10
+                        años</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="stack-16">
+            <div class="label-14">Supuestos de Rendimiento</div>
+            <div class="assumptions">
+              <div class="kv-row">
+                <span class="body-12-slate">Tasa de Degradación (Año 1):</span>
+                <span class="body-12-strong">1.0%</span>
+              </div>
+              <div class="divider"></div>
+              <div class="kv-row">
+                <span class="body-12-slate">Tasa de Degradación (Año 2+):</span>
+                <span class="body-12-strong">0.4%</span>
+              </div>
+              <div class="divider"></div>
+              <div class="kv-row">
+                <span class="body-12-slate">Pérdidas por Sombreado:</span>
+                <span class="body-12-strong">1.0%</span>
+              </div>
+            </div>
+          </div>
+
+          <p class="body-12-muted">Esta robusta base técnica y financiera se complementa con un estado regulatorio
+            avanzado, minimizando los riesgos de ejecución y asegurando un camino claro hacia la operación comercial.
+          </p>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-title">4. Estado Regulatorio y Cronograma de Ejecución</div>
+        <div class="stack-24">
+          <p class="body-12-muted">El proyecto ha alcanzado un grado significativo de madurez, habiendo asegurado los
+            permisos críticos requeridos para su desarrollo, lo que demuestra una gestión proactiva de los riesgos
+            regulatorios y confirma la viabilidad de la interconexión a la red.</p>
+
+          <div class="callout">
+            <div class="label-14">Informe de Factibilidad Eléctrica</div>
+            <p class="body-12-muted">Emitido, confirmando la capacidad disponible de 4 MW en el punto de conexión. La
+              validez del informe será un punto clave de verificación antes del cierre financiero.</p>
+          </div>
+
+          <div class="stack-16">
+            <div class="label-14-strong">Cronograma de Ejecución</div>
+            <div class="timeline">
+              <div class="timeline-row">
+                <div class="badge"><span class="badge-text">Q2 2025</span></div>
+                <span class="body-12">Cierre Financiero</span>
+              </div>
+              <div class="timeline-row">
+                <div class="badge"><span class="badge-text">Q3 2025</span></div>
+                <span class="body-12">Inicio de Construcción</span>
+              </div>
+              <div class="timeline-row">
+                <div class="badge"><span class="badge-text">Q4 2026</span></div>
+                <span class="body-12">Inicio de Operaciones</span>
+              </div>
+            </div>
+          </div>
+
+          <p class="body-12-muted">El proyecto no solo cumple con los requisitos técnicos y regulatorios, sino que
+            también se adhiere a los más altos estándares de gobernanza ambiental y social.</p>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="section-title-lg">5. Gobernanza Ambiental y Social (ESG)</div>
+        <div class="stack-24">
+          <p class="body-12-muted">El compromiso con las prácticas de Gobernanza Ambiental, Social y Corporativa (ESG)
+            es un pilar fundamental del proyecto. La adhesión a los Estándares de Desempeño de la Corporación Financiera
+            Internacional (IFC) es particularmente crítica dado la integración del proyecto con el sector de exportación
+            de alimentos (camarón), asegurando que su gobernanza ambiental y social cumpla con los exigentes estándares
+            de las cadenas de suministro internacionales y compradores.</p>
+
+          <div class="esg-list">
+            <div class="esg-item">
+              <div class="esg-check">✓</div>
+              <div class="stack-8">
+                <div class="label-14-strong">Política ESHS</div>
+                <div class="body-12-slate">Ambiente, Salud y Seguridad - Existente</div>
+              </div>
+            </div>
+            <div class="esg-item">
+              <div class="esg-check">✓</div>
+              <div class="stack-8">
+                <div class="label-14-strong">Planes ESMP</div>
+                <div class="body-12-slate">Planes de Gestión Ambiental y Social - Implementados</div>
+              </div>
+            </div>
+            <div class="esg-item">
+              <div class="esg-check">✓</div>
+              <div class="stack-8">
+                <div class="label-14-strong">Cumplimiento de Derechos Laborales</div>
+                <div class="body-12-slate">Políticas de RRHH - Alineadas con estándares IFC</div>
+              </div>
+            </div>
+            <div class="esg-item">
+              <div class="esg-check">✓</div>
+              <div class="stack-8">
+                <div class="label-14-strong">Permisos Ambientales</div>
+                <div class="body-12-slate">Permisos clave - Vigentes</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="summary">
+        <p class="summary-text">En resumen, <strong>Biogemar - Santa Elena</strong> no es simplemente un activo solar;
+          es un punto de entrada de bajo riesgo al sector industrial de alto crecimiento de Ecuador, proporcionando
+          flujos de caja estables a largo plazo a través de la aplicación estratégica de energía limpia a la industria
+          camaronera crítica del país. Este proyecto combina tecnología probada, finanzas sólidas y un marco ESG
+          robusto, representando una oportunidad de inversión de primer nivel en energía renovable latinoamericana.</p>
+      </section>
+    </main>
+  </div>
+</body>
+
+</html>
