@@ -168,7 +168,7 @@ DOCUMENT_TYPE_DESCRIPTIONS: dict[DocumentType, str] = {
     # ESG
     DocumentType.ENVIRONMENTAL_AND_SOCIAL_MANAGEMENT_PLAN: "Environmental and Social Management Plan (EMP/ESMP) or ESHS Policy. This document covers high-level corporate ESG commitments AND/OR field-level worker safety and health. It may include: validity periods, corporate monitoring indicators, mitigation strategies for biodiversity vs climate, AND/OR strict field procedures, PPE rules, worker rights, hazard handling, site waste disposal, and OHS principles. Often titled 'PGAS', 'EMP', 'ESMP', 'Health & Safety Plan', or 'ESHS Policy'.",
     DocumentType.QAQC_COMMISSIONING_PROCEDURES: "Quality Assurance/Quality Control and commissioning procedures document including visual inspection summary, electrical test results, and performance metrics",
-    DocumentType.INDUSTRIAL_SAFETY_PLAN: "Human Resources manual or Code of Conduct document containing IFC-aligned HR practices and company policies",
+    DocumentType.INDUSTRIAL_SAFETY_PLAN: "Industrial Safety Plan document containing IFC-aligned HR practices that should be summarized in the source document language",
     DocumentType.ENVIRONMENTAL_LICENCE_EIA: "Environmental licence or EIA documentation including licence metadata and ESG risk-screening findings for habitats, biodiversity, communities, heritage, and consultation.",
     DocumentType.EMERGENCY_RESPONSE_SECURITY_PLAN: "Emergency response and security plan covering climate and security risks, crisis protocols, adaptation actions, and authority coordination.",
     DocumentType.SITE_LEGAL_STATUS_SUMMARY: "Site legal status summary with land tenure, title/lease documentation, rights and claims, disputes, and expropriation risk context.",
@@ -1649,85 +1649,25 @@ class QAQCCommissioningData(BaseModel):
     )
 
 
-class HRManualCodeOfConductData(BaseModel):
+class IndustrialSafetyPlanData(BaseModel):
     """
     Schema for Industrial Safety Plan (Section 3.3).
 
-    Human resources policies and code of conduct aligned with IFC standards.
+    Extract only the IFC-aligned HR practices summary required by the stakeholder mapping.
     """
 
     model_config = ConfigDict(extra="forbid")
 
     # -------------------------------------------------------------------------
-    # IFC-aligned HR Practices Summary
+    # Industrial Safety Plan Summary
     # -------------------------------------------------------------------------
     ifc_aligned_hr_practices_summary: Optional[str] = Field(
         default=None,
         description=(
-            "Summary of IFC-aligned HR practices. "
-            "Key HR policies that align with international standards. "
-            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+            "Summary of IFC-aligned HR practices described in the Industrial Safety Plan. "
+            "Return the summary in the exact same language as the source document. "
+            "Do not translate, normalize, or rewrite it into another language."
         ),
-    )
-
-    # -------------------------------------------------------------------------
-    # Key Policy Areas (extracted summaries)
-    # -------------------------------------------------------------------------
-    non_discrimination_policy: Optional[str] = Field(
-        default=None,
-        description=(
-            "Summary of non-discrimination and equal opportunity policies. "
-            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
-        ),
-    )
-    grievance_mechanism: Optional[str] = Field(
-        default=None,
-        description=(
-            "Summary of grievance mechanism and complaint procedures. "
-            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
-        ),
-    )
-    working_conditions: Optional[str] = Field(
-        default=None,
-        description=(
-            "Summary of working conditions policies (hours, overtime, leave). "
-            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
-        ),
-    )
-    child_labor_policy: Optional[str] = Field(
-        default=None,
-        description=(
-            "Summary of child labor prevention policy. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
-        ),
-    )
-    forced_labor_policy: Optional[str] = Field(
-        default=None,
-        description=(
-            "Summary of forced labor prevention policy. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
-        ),
-    )
-    health_safety_policy: Optional[str] = Field(
-        default=None,
-        description=(
-            "Summary of occupational health and safety policies for workers. "
-            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
-        ),
-    )
-
-    # -------------------------------------------------------------------------
-    # Document Metadata
-    # -------------------------------------------------------------------------
-    document_date: Optional[str] = Field(
-        default=None,
-        description="Date of the HR manual or code of conduct (YYYY-MM-DD if available)",
-    )
-    document_version: Optional[str] = Field(
-        default=None,
-        description="Version number or revision",
-    )
-    company_name: Optional[str] = Field(
-        default=None,
-        description="Company name as stated in the document",
     )
 
 
@@ -2332,8 +2272,8 @@ class ESGData(BaseModel):
     qaqc_commissioning: Optional[QAQCCommissioningData] = Field(
         default=None, description="QA/QC and commissioning data (Section 3.2)"
     )
-    INDUSTRIAL_SAFETY_PLAN: Optional[HRManualCodeOfConductData] = Field(
-        default=None, description="HR manual and code of conduct data (Section 3.3)"
+    INDUSTRIAL_SAFETY_PLAN: Optional[IndustrialSafetyPlanData] = Field(
+        default=None, description="Industrial safety plan data (Section 3.3)"
     )
     environmental_licence_eia: Optional[EnvironmentalLicenceEIAData] = Field(
         default=None,
@@ -2424,7 +2364,7 @@ PYDANTIC_MODELS: dict[DocumentType, Type[BaseModel]] = {
     # ESG
     DocumentType.ENVIRONMENTAL_AND_SOCIAL_MANAGEMENT_PLAN: ESHSESMSPoliciesData,
     DocumentType.QAQC_COMMISSIONING_PROCEDURES: QAQCCommissioningData,
-    DocumentType.INDUSTRIAL_SAFETY_PLAN: HRManualCodeOfConductData,
+    DocumentType.INDUSTRIAL_SAFETY_PLAN: IndustrialSafetyPlanData,
     DocumentType.ENVIRONMENTAL_LICENCE_EIA: EnvironmentalLicenceEIAData,
     DocumentType.EMERGENCY_RESPONSE_SECURITY_PLAN: EmergencyResponseSecurityPlanData,
     DocumentType.SITE_LEGAL_STATUS_SUMMARY: SiteLegalStatusSummaryData,

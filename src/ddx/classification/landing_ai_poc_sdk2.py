@@ -32,7 +32,7 @@ from ddx.classification.categories import (
     DOCUMENT_TYPE_TO_TOP_LEVEL,
     ESHSESMSPoliciesData,
     QAQCCommissioningData,
-    HRManualCodeOfConductData,
+    IndustrialSafetyPlanData,
     EnvironmentalLicenceEIAData,
     EmergencyResponseSecurityPlanData,
     SiteLegalStatusSummaryData,
@@ -452,10 +452,10 @@ class ProjectSimulationReportData(BaseModel):
         default=None,
         description="P90 annual production probability value in MWh - production level with 90% probability of exceedance",
     )
-    p95_value: Optional[float] = Field(
-        default=None,
-        description="P95 annual production probability value in MWh - production level with 95% probability of exceedance",
-    )
+    # p95_value: Optional[float] = Field(
+    #     default=None,
+    #     description="P95 annual production probability value in MWh - production level with 95% probability of exceedance",
+    # )
     google_maps_link: Optional[str] = Field(
         default=None,
         description="Google Maps URL derived from geographical_coordinates. Computed in post-processing.",
@@ -771,7 +771,7 @@ PYDANTIC_MODELS: Dict[str, Type[BaseModel]] = {
     # ESG (from categories.py)
     DocumentType.ENVIRONMENTAL_AND_SOCIAL_MANAGEMENT_PLAN.value: ESHSESMSPoliciesData,
     DocumentType.QAQC_COMMISSIONING_PROCEDURES.value: QAQCCommissioningData,
-    DocumentType.INDUSTRIAL_SAFETY_PLAN.value: HRManualCodeOfConductData,
+    DocumentType.INDUSTRIAL_SAFETY_PLAN.value: IndustrialSafetyPlanData,
     DocumentType.ENVIRONMENTAL_LICENCE_EIA.value: EnvironmentalLicenceEIAData,
     DocumentType.EMERGENCY_RESPONSE_SECURITY_PLAN.value: EmergencyResponseSecurityPlanData,
     DocumentType.SITE_LEGAL_STATUS_SUMMARY.value: SiteLegalStatusSummaryData,
