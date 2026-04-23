@@ -62,6 +62,8 @@ from ddx.api.models import (
     SummaryGenerationRequest,
     SummaryGenerationResponse,
     SummarySectionOutput,
+    TeaserNarrativeGenerationRequest,
+    TeaserNarrativeGenerationResponse,
 )
 
 log = logging.getLogger("ddx.api.services")
@@ -518,7 +520,7 @@ def _generate_summary_with_openai(req: SummaryGenerationRequest) -> SummaryGener
     from openai import OpenAI
 
     model_name = req.model or os.getenv("SUMMARY_MODEL") or os.getenv("LLM_MODEL")
-    model_name = model_name or "gpt-4.1-2025-04-14"
+    model_name = model_name or "gpt-5-nano-2025-08-07"
 
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -635,6 +637,489 @@ async def generate_structured_summary(req: SummaryGenerationRequest) -> SummaryG
             e,
         )
         fallback_result = _build_fallback_summary(req, str(e))
+        _persist_summary_trace(
+            request_payload,
+            fallback_result.model_dump(),
+            status="fallback",
+            error=str(e),
+        )
+        return fallback_result
+
+
+# =============================================================================
+# Teaser Narrative Generation Service
+# =============================================================================
+
+
+_TEASER_NARRATIVE_FIELDS: List[str] = [
+    "overview",
+    "financial",
+    "technical",
+    "regulatory",
+    "esg",
+    "conclusion",
+]
+
+_TEASER_SECTION_GUIDANCE: Dict[str, Dict[str, Any]] = {
+    "overview": {
+        "purpose": "Project summary and investment opportunity framing only.",
+        "allowed_topics": [
+            "project identity and name",
+            "location or country context",
+            "industry or offtaker sector context",
+            "high-level project sizing and technical positioning",
+            "broad investment-opportunity positioning",
+            "high-level regulatory support framing without raw codes or dates",
+        ],
+        "forbidden_topics": [
+            "CAPEX amounts",
+            "equity or invested by offtaker amounts",
+            "IRR",
+            "DSCR",
+            "PPA term",
+            "financing structure details",
+            "detailed financial metrics that belong to section 2",
+            "raw regulatory framework codes or document IDs such as ARCERNNR",
+            "exact feasibility capacities, issue dates, expiry dates, or callout detail that belongs to section 4",
+            "ESG delivery counts, missing-item recaps, or section 5 commentary",
+            "meta commentary about what section 1 does or does not cover",
+        ],
+        "reference_alignment": (
+            "Match the teaser reference layout: section 1 introduces the project and investment opportunity, "
+            "uses broad market and technical positioning, and ends with a bridge that the section 1 technical "
+            "parameters support the attractiveness assessed in later sections."
+        ),
+        "paragraph_structure": {
+            "paragraph_1": "Present the project opportunity, country or market context, sector context, and high-level positioning only.",
+            "paragraph_2": "Close by linking the section 1 technical parameters to overall project attractiveness without repeating section 2, 4, or 5 detail.",
+        },
+    },
+    "financial": {
+        "purpose": "Own all financial and commercial metrics for section 2.",
+        "allowed_topics": [
+            "CAPEX including VAT",
+            "CAPEX excluding VAT",
+            "invested by offtaker or equity contribution",
+            "IRR",
+            "DSCR",
+            "PPA term",
+        ],
+        "forbidden_topics": [
+            "raw ESG status narration",
+            "equipment specification detail",
+            "detailed regulatory callout wording that belongs to section 4",
+        ],
+    },
+    "technical": {
+        "purpose": "Own equipment, warranty, and performance assumptions for section 3.",
+    },
+    "regulatory": {
+        "purpose": "Own feasibility, framework, capacity, and date details for section 4.",
+    },
+    "esg": {
+        "purpose": "Own ESG delivery-state commentary for section 5.",
+    },
+    "conclusion": {
+        "purpose": "Synthesize the teaser without repeating detailed KPI enumerations.",
+    },
+}
+
+
+def _count_words(value: str) -> int:
+    return len(re.findall(r"\b\w+\b", value or ""))
+
+
+def _build_teaser_narrative_system_prompt() -> str:
+    return (
+        "You generate bounded narrative text for an executive investment teaser. "
+        "Use only the supplied structured teaser data. "
+        "Write every narrative field entirely in the language specified by request.language; when unspecified, default to Spanish ('es'). "
+        "Section boundaries are strict: overview must stay non-financial, section-specific, and reference-shaped, while financial details belong only in the financial section. "
+        "When a topic is forbidden for a section, omit it entirely even if it appears elsewhere in teaser_data. "
+        "Overview must not absorb raw regulatory framework codes, dates, hosting-capacity detail, or ESG card-state recap. "
+        "Do not invent numbers, dates, document states, ESG statuses, names, or locations. "
+        "Do not return HTML, markdown, bullet lists, tables, or extra keys. "
+        "Return valid JSON matching the requested schema exactly."
+    )
+
+
+def _build_teaser_narrative_user_payload(
+    req: TeaserNarrativeGenerationRequest,
+) -> Dict[str, Any]:
+    return {
+        "schema_version": "teaser_narrative_v1",
+        "project_id": req.project_id,
+        "project_name": req.project_name,
+        "language": req.language,
+        "tone": req.tone,
+        "word_budgets": req.word_budgets.model_dump(),
+        "teaser_data": req.teaser_data,
+        "section_guidance": _TEASER_SECTION_GUIDANCE,
+        "hard_rules": {
+            "no_html": True,
+            "no_markdown": True,
+            "no_tables": True,
+            "no_numeric_invention": True,
+            "use_only_supplied_facts": True,
+            "keep_overview_non_financial": True,
+            "overview_forbids_raw_regulatory_detail": True,
+            "overview_forbids_esg_recap": True,
+            "overview_requires_reference_shaped_opportunity_summary": True,
+        },
+    }
+
+
+def _find_overview_boundary_violations(
+    req: TeaserNarrativeGenerationRequest,
+    overview: str,
+) -> List[str]:
+    violations: List[str] = []
+    normalized = overview or ""
+
+    keyword_checks = [
+        (r"\bcapex\b", "financial KPI mention (CAPEX)"),
+        (r"\bdscr\b", "financial KPI mention (DSCR)"),
+        (r"\birr\b", "financial KPI mention (IRR)"),
+        (r"\bppa\b", "financial KPI mention (PPA)"),
+        (r"\busd\b", "currency-specific financial detail"),
+        (r"\biva\b", "VAT-specific financial detail"),
+        (r"\bofftaker\b", "capital-structure detail"),
+        (r"\bequity\b", "capital-structure detail"),
+        (r"\bdebt\b", "capital-structure detail"),
+    ]
+
+    for pattern, reason in keyword_checks:
+        if re.search(pattern, normalized, flags=re.IGNORECASE):
+            violations.append(reason)
+
+    regulatory_framework = ((req.teaser_data or {}).get("regulatory") or {}).get(
+        "regulatoryFramework"
+    )
+    if isinstance(regulatory_framework, str) and regulatory_framework.strip():
+        if regulatory_framework.strip().lower() in normalized.lower():
+            violations.append("raw regulatory framework code in overview")
+
+    if re.search(r"\b\d{1,2}/\d{1,2}/\d{4}\b", normalized):
+        violations.append("dated regulatory detail in overview")
+
+    if re.search(
+        r"\bavailable hosting capacity\b|\bhosting disponible\b", normalized, flags=re.IGNORECASE
+    ):
+        violations.append("section 4 hosting-capacity detail in overview")
+
+    if re.search(
+        r"\bmissing\b|\bdeliver_later\b|\bno disponible\b", normalized, flags=re.IGNORECASE
+    ):
+        violations.append("section 5 delivery-state recap in overview")
+
+    return sorted(set(violations))
+
+
+def _validate_teaser_narrative_section_boundaries(
+    req: TeaserNarrativeGenerationRequest,
+    parsed: Dict[str, Any],
+) -> None:
+    overview_violations = _find_overview_boundary_violations(
+        req,
+        parsed.get("overview", ""),
+    )
+    if overview_violations:
+        raise RuntimeError(
+            "Teaser narrative overview violated section boundary: " + "; ".join(overview_violations)
+        )
+
+
+def _build_teaser_narrative_response_schema() -> Dict[str, Any]:
+    properties = {field_name: {"type": "string"} for field_name in _TEASER_NARRATIVE_FIELDS}
+
+    return {
+        "name": "project_teaser_narrative_response",
+        "schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": properties,
+            "required": _TEASER_NARRATIVE_FIELDS,
+        },
+        "strict": True,
+    }
+
+
+def _extract_teaser_fallback_context(
+    req: TeaserNarrativeGenerationRequest,
+) -> Dict[str, Any]:
+    teaser_data = req.teaser_data or {}
+    project = teaser_data.get("project") or {}
+    narrative_context = teaser_data.get("narrativeContext") or {}
+
+    return {
+        "teaser_data": teaser_data,
+        "project_name": project.get("name") or req.project_name,
+        "country": narrative_context.get("country") or "el mercado objetivo",
+        "industry": narrative_context.get("industry") or "el sector operativo del offtaker",
+        "sector": narrative_context.get("offtakerSector")
+        or narrative_context.get("industry")
+        or "el sector operativo del offtaker",
+        "investment_angle": narrative_context.get("investmentAngle")
+        or "las métricas del proyecto y la evidencia documental disponible",
+    }
+
+
+def _build_fallback_financial_narrative(metrics: Dict[str, Any]) -> str:
+    total_dc = metrics.get("totalDcCapacityKw")
+    total_ac = metrics.get("totalAcCapacityKw")
+    annual_energy = metrics.get("annualEnergyProductionMwh")
+    ppa_years = metrics.get("ppaLengthYears")
+
+    return (
+        "El posicionamiento financiero se basa en los datos estructurados del teaser recibidos desde NestJS. "
+        f"La configuración reportada indica {total_dc if total_dc is not None else 'una capacidad no disponible'} kWdc y {total_ac if total_ac is not None else 'una capacidad no disponible'} kWac, con una producción anual de {annual_energy if annual_energy is not None else 'valor no disponible'} MWh cuando está informada. "
+        f"El plazo comercial modelado es de {ppa_years if ppa_years is not None else 'duración no disponible'} años."
+    )
+
+
+def _build_fallback_technical_narrative(technical_data: Dict[str, Any]) -> str:
+    return (
+        "El comentario técnico se mantiene limitado a los equipos mapeados y a los valores provenientes de la simulación. "
+        f"Las referencias actuales de equipamiento apuntan a {technical_data.get('solarModuleBrand') or 'un proveedor de módulos no especificado'} para módulos y a {technical_data.get('inverterBrand') or 'un proveedor de inversores no especificado'} para inversores. "
+        "Los supuestos de garantía y pérdidas deben leerse junto con la tabla técnica estructurada del teaser."
+    )
+
+
+def _build_fallback_esg_narrative(
+    project_name: str,
+    sector: str,
+    esg: Dict[str, Any],
+) -> str:
+    delivered_count = sum(
+        1 for card in esg.values() if isinstance(card, dict) and card.get("state") == "delivered"
+    )
+    total_cards = sum(1 for card in esg.values() if isinstance(card, dict))
+
+    return (
+        f"La cobertura ESG de {project_name} se deriva de los estados fijos de las tarjetas del teaser y no de inferencia libre del modelo. "
+        f"La carga estructurada actual muestra {delivered_count} elementos entregados de {total_cards} tarjetas ESG monitoreadas, cubriendo evidencia relevante del contratista y del offtaker para {sector}."
+    )
+
+
+def _build_fallback_teaser_narrative(
+    req: TeaserNarrativeGenerationRequest, reason: str
+) -> TeaserNarrativeGenerationResponse:
+    context = _extract_teaser_fallback_context(req)
+    teaser_data = context["teaser_data"]
+    project_name = context["project_name"]
+    country = context["country"]
+    industry = context["industry"]
+    sector = context["sector"]
+    investment_angle = context["investment_angle"]
+
+    metrics = teaser_data.get("metrics") or {}
+    technical_data = teaser_data.get("technical") or {}
+    regulatory_data = teaser_data.get("regulatory") or {}
+    esg = teaser_data.get("esg") or {}
+    regulatory_feasibility = regulatory_data.get("feasibilityIssued")
+    delivered_count = sum(
+        1 for card in esg.values() if isinstance(card, dict) and card.get("state") == "delivered"
+    )
+    total_cards = sum(1 for card in esg.values() if isinstance(card, dict))
+
+    overview_signals: List[str] = []
+
+    if regulatory_feasibility == "Yes":
+        overview_signals.append("documented grid-feasibility status")
+    elif regulatory_data.get("feasibilitySummary"):
+        overview_signals.append("partial regulatory visibility")
+
+    if (
+        metrics.get("totalDcCapacityKw") is not None
+        or metrics.get("performanceRatioPct") is not None
+        or metrics.get("dcAcRatio") is not None
+    ):
+        overview_signals.append("documented technical configuration")
+
+    if delivered_count > 0:
+        overview_signals.append(
+            "broad delivered ESG evidence"
+            if delivered_count >= 4
+            else "partial delivered ESG evidence"
+        )
+
+    if not overview_signals:
+        overview_focus = "project positioning, technical configuration, regulatory feasibility, and ESG delivery status"
+    elif len(overview_signals) == 1:
+        overview_focus = overview_signals[0]
+    elif len(overview_signals) == 2:
+        overview_focus = f"{overview_signals[0]} and {overview_signals[1]}"
+    else:
+        overview_focus = f"{overview_signals[0]}, {overview_signals[1]}, and {overview_signals[2]}"
+
+    overview = (
+        f"{project_name} se presenta como una oportunidad de inversión solar en {country}. "
+        f"La oportunidad se posiciona alrededor de {industry}, con foco en la identidad del proyecto, su configuración técnica, la viabilidad regulatoria y el estado general de avance ESG. "
+        f"El encuadre actual del proyecto enfatiza {overview_focus}."
+    )
+    financial = _build_fallback_financial_narrative(metrics)
+    technical = _build_fallback_technical_narrative(technical_data)
+
+    regulatory = (
+        regulatory_data.get("feasibilitySummary")
+        or "El comentario regulatorio queda limitado a los datos mapeados de factibilidad, y el teaser debe apoyarse en el resumen regulatorio estructurado cuando la generación narrativa no esté disponible."
+    )
+    esg_text = _build_fallback_esg_narrative(project_name, sector, esg)
+
+    conclusion = (
+        f"En conjunto, {project_name} debe evaluarse primero a través de las métricas estructuradas del teaser y de la evidencia de soporte disponible. "
+        f"La capa narrativa está operando en modo determinístico de respaldo porque la respuesta de IA no estuvo disponible o no fue válida ({reason})."
+    )
+
+    return TeaserNarrativeGenerationResponse(
+        generated_at=_utc_now_iso(),
+        project_id=req.project_id,
+        project_name=req.project_name,
+        language=req.language,
+        model_version="fallback-rule-based",
+        overview=overview,
+        financial=financial,
+        technical=technical,
+        regulatory=regulatory,
+        esg=esg_text,
+        conclusion=conclusion,
+        quality_checks={
+            "within_budget": False,
+            "fallback_reason": reason,
+        },
+        generation_mode="fallback",
+    )
+
+
+def _validate_teaser_narrative_budgets(
+    req: TeaserNarrativeGenerationRequest,
+    parsed: Dict[str, Any],
+) -> Dict[str, int]:
+    section_word_counts: Dict[str, int] = {}
+
+    for field_name in _TEASER_NARRATIVE_FIELDS:
+        text = parsed.get(field_name, "")
+        word_count = _count_words(text)
+        section_word_counts[field_name] = word_count
+
+        budget = getattr(req.word_budgets, field_name)
+        if word_count < budget.min_words or word_count > budget.max_words:
+            raise RuntimeError(
+                f"Teaser narrative field '{field_name}' violated word budget: {word_count} words, expected {budget.min_words}-{budget.max_words}"
+            )
+
+    return section_word_counts
+
+
+def _generate_teaser_narrative_with_openai(
+    req: TeaserNarrativeGenerationRequest,
+) -> TeaserNarrativeGenerationResponse:
+    from openai import OpenAI
+
+    model_name = req.model or os.getenv("SUMMARY_MODEL") or os.getenv("LLM_MODEL")
+    model_name = model_name or "gpt-5-nano-2025-08-07"
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is not configured")
+
+    client = OpenAI(api_key=api_key)
+
+    def request_completion(repair_note: Optional[str] = None):
+        user_prompt = (
+            "Generate teaser narrative JSON using this payload:\n"
+            f"{json.dumps(_build_teaser_narrative_user_payload(req), ensure_ascii=False)}"
+        )
+        if repair_note:
+            user_prompt += (
+                "\n\nThe previous draft was rejected. Regenerate the full response and obey the section guidance exactly. "
+                f"Rejected because: {repair_note}"
+            )
+
+        return client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": _build_teaser_narrative_system_prompt()},
+                {"role": "user", "content": user_prompt},
+            ],
+            response_format={
+                "type": "json_schema",
+                "json_schema": _build_teaser_narrative_response_schema(),
+            },
+        )
+
+    def parse_and_validate(completion) -> Tuple[Dict[str, Any], Dict[str, int]]:
+        content = completion.choices[0].message.content if completion.choices else None
+        if not content:
+            raise RuntimeError("LLM returned empty response for teaser narrative generation")
+
+        parsed = json.loads(content)
+        section_word_counts = _validate_teaser_narrative_budgets(req, parsed)
+        _validate_teaser_narrative_section_boundaries(req, parsed)
+        return parsed, section_word_counts
+
+    completion = request_completion()
+
+    try:
+        parsed, section_word_counts = parse_and_validate(completion)
+    except RuntimeError as first_error:
+        completion = request_completion(str(first_error))
+        parsed, section_word_counts = parse_and_validate(completion)
+
+    return TeaserNarrativeGenerationResponse(
+        generated_at=_utc_now_iso(),
+        project_id=req.project_id,
+        project_name=req.project_name,
+        language=req.language,
+        model_version=getattr(completion, "model", model_name),
+        overview=parsed.get("overview", ""),
+        financial=parsed.get("financial", ""),
+        technical=parsed.get("technical", ""),
+        regulatory=parsed.get("regulatory", ""),
+        esg=parsed.get("esg", ""),
+        conclusion=parsed.get("conclusion", ""),
+        quality_checks={
+            "within_budget": True,
+            "word_counts": section_word_counts,
+        },
+        generation_mode="llm",
+    )
+
+
+async def generate_teaser_narrative(
+    req: TeaserNarrativeGenerationRequest,
+) -> TeaserNarrativeGenerationResponse:
+    """Generate teaser narrative fields from structured teaser data."""
+
+    request_payload = _build_teaser_narrative_user_payload(req)
+
+    log.info(
+        "Teaser narrative request: project=%s, language=%s",
+        req.project_id,
+        req.language,
+    )
+    log.debug("Teaser narrative payload: %s", _truncate_for_log(request_payload))
+
+    try:
+        result = await asyncio.to_thread(_generate_teaser_narrative_with_openai, req)
+        _persist_summary_trace(
+            request_payload,
+            result.model_dump(),
+            status="success",
+        )
+        log.info(
+            "Teaser narrative done: project=%s, mode=%s",
+            req.project_id,
+            result.generation_mode,
+        )
+        return result
+    except Exception as e:
+        log.warning(
+            "Teaser narrative falling back for project=%s: %s",
+            req.project_id,
+            e,
+        )
+        fallback_result = _build_fallback_teaser_narrative(req, str(e))
         _persist_summary_trace(
             request_payload,
             fallback_result.model_dump(),
