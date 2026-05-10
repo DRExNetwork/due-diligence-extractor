@@ -4,6 +4,7 @@
 Document categories and extraction schemas for due diligence documents.
 Supports two-level categorization: Top-level category → Document type
 """
+
 from __future__ import annotations
 
 import re
@@ -12,7 +13,6 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, Type
 from urllib.parse import quote
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-
 
 # =============================================================================
 # Top-Level Categories (Level 1)
@@ -1985,14 +1985,6 @@ class NonOverlapProtectedAreasCertificateData(BaseModel):
         description="Geographic reference (coordinates or location reference)",
     )
     issuing_authority: Optional[str] = Field(default=None, description="Issuing authority")
-    date_of_issuance: Optional[str] = Field(
-        default=None,
-        description="Date of issuance (YYYY-MM-DD)",
-    )
-    validity_date: Optional[str] = Field(
-        default=None,
-        description="Validity date (YYYY-MM-DD)",
-    )
 
 
 class HRPolicyCodeOfConductData(BaseModel):
