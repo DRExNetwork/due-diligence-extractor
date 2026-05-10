@@ -64,6 +64,7 @@ from ddx.api.models import (
     SummarySectionOutput,
     TeaserNarrativeGenerationRequest,
     TeaserNarrativeGenerationResponse,
+    TeaserRenderContent,
 )
 
 log = logging.getLogger("ddx.api.services")
@@ -136,14 +137,10 @@ def _normalize_document_type(document_type: str) -> str:
 
 _RESEARCH_FIELDS: List[str] = [
     "module_bloomberg",
-    "module_certifications",
     "module_certificate_evidence",
-    "module_factory_test_date",
     "module_test_evidence",
     "inverter_bloomberg",
-    "inverter_certifications",
     "inverter_certificate_evidence",
-    "inverter_anti_island_test_date",
     "inverter_test_evidence",
 ]
 
@@ -208,9 +205,10 @@ async def _resolve_research_payload_for_extracted_data(
     cache: Dict[Tuple[str, str], Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
     module_brand, inverter_brand = _extract_equipment_brands(extracted_data)
-    if not (module_brand or inverter_brand):
-        return None
-
+    # Always resolve a payload — even when both brands are missing, so that
+    # repeated research fields receive placeholder rows (with known anchors
+    # such as standard_code / test_name pre-filled) giving NestJS a variableId
+    # for each certificate/test slot that users can later edit or re-trigger.
     cache_key = (module_brand or "", inverter_brand or "")
     print("this is cache key", cache_key)
     print("this is cache", cache)
@@ -651,76 +649,82 @@ async def generate_structured_summary(req: SummaryGenerationRequest) -> SummaryG
 # =============================================================================
 
 
-_TEASER_NARRATIVE_FIELDS: List[str] = [
-    "overview",
-    "financial",
-    "technical",
-    "regulatory",
-    "esg",
+_TEASER_RENDER_CONTENT_FIELDS: List[str] = [
+    "overview_intro",
+    "overview_closing",
+    "financial_intro",
+    "financial_body",
+    "financial_closing",
+    "technical_intro",
+    "technical_closing",
+    "regulatory_intro",
+    "regulatory_closing",
+    "esg_intro",
     "conclusion",
 ]
 
-_TEASER_SECTION_GUIDANCE: Dict[str, Dict[str, Any]] = {
-    "overview": {
-        "purpose": "Project summary and investment opportunity framing only.",
+_TEASER_RENDER_FIELD_GUIDANCE: Dict[str, Dict[str, Any]] = {
+    "overview_intro": {
+        "role": "Open the teaser and frame the project as an investment opportunity.",
         "allowed_topics": [
-            "project identity and name",
-            "location or country context",
-            "industry or offtaker sector context",
-            "high-level project sizing and technical positioning",
-            "broad investment-opportunity positioning",
-            "high-level regulatory support framing without raw codes or dates",
+            "project identity",
+            "market context",
+            "offtaker sector",
+            "country",
+            "high-level investment thesis",
+            "teaser_data.project.description as context",
         ],
-        "forbidden_topics": [
-            "CAPEX amounts",
-            "equity or invested by offtaker amounts",
-            "IRR",
-            "DSCR",
-            "PPA term",
-            "financing structure details",
-            "detailed financial metrics that belong to section 2",
-            "raw regulatory framework codes or document IDs such as ARCERNNR",
-            "exact feasibility capacities, issue dates, expiry dates, or callout detail that belongs to section 4",
-            "ESG delivery counts, missing-item recaps, or section 5 commentary",
-            "meta commentary about what section 1 does or does not cover",
-        ],
-        "reference_alignment": (
-            "Match the teaser reference layout: section 1 introduces the project and investment opportunity, "
-            "uses broad market and technical positioning, and ends with a bridge that the section 1 technical "
-            "parameters support the attractiveness assessed in later sections."
-        ),
-        "paragraph_structure": {
-            "paragraph_1": "Present the project opportunity, country or market context, sector context, and high-level positioning only.",
-            "paragraph_2": "Close by linking the section 1 technical parameters to overall project attractiveness without repeating section 2, 4, or 5 detail.",
-        },
+        "forbidden_topics": ["CAPEX detail", "DSCR detail", "PPA detail"],
     },
-    "financial": {
-        "purpose": "Own all financial and commercial metrics for section 2.",
-        "allowed_topics": [
-            "CAPEX including VAT",
-            "CAPEX excluding VAT",
-            "invested by offtaker or equity contribution",
-            "IRR",
-            "DSCR",
-            "PPA term",
-        ],
-        "forbidden_topics": [
-            "raw ESG status narration",
-            "equipment specification detail",
-            "detailed regulatory callout wording that belongs to section 4",
-        ],
+    "overview_closing": {
+        "role": "Bridge from the introduction into the key metrics table and broader diligence path.",
+        "allowed_topics": ["high-level technical and investment framing"],
+        "forbidden_topics": ["detailed financial metrics", "ESG card-state recap"],
     },
-    "technical": {
-        "purpose": "Own equipment, warranty, and performance assumptions for section 3.",
+    "financial_intro": {
+        "role": "Introduce the financial viability of the project.",
+        "allowed_topics": ["overall profitability framing", "capital discipline", "financing readiness"],
+        "forbidden_topics": ["equipment detail", "ESG detail"],
     },
-    "regulatory": {
-        "purpose": "Own feasibility, framework, capacity, and date details for section 4.",
+    "financial_body": {
+        "role": "Interpret CAPEX, IRR, DSCR, invested capital, capital structure, and debt/equity posture.",
+        "allowed_topics": ["financial metrics from teaser_data.metrics only"],
+        "forbidden_topics": ["technical warranties", "regulatory dates", "ESG states"],
     },
-    "esg": {
-        "purpose": "Own ESG delivery-state commentary for section 5.",
+    "financial_closing": {
+        "role": "Close the financial section and transition into technical robustness.",
+        "allowed_topics": ["connection between financial outcomes and technical design quality"],
+        "forbidden_topics": ["new numeric invention"],
+    },
+    "technical_intro": {
+        "role": "Explain equipment quality, technical risk mitigation, and performance assumptions.",
+        "allowed_topics": ["brands", "models", "warranties", "degradation", "shading losses"],
+        "forbidden_topics": ["CAPEX or debt interpretation"],
+    },
+    "technical_closing": {
+        "role": "Bridge from technical quality to execution and regulatory readiness.",
+        "allowed_topics": ["technical de-risking", "implementation readiness"],
+        "forbidden_topics": ["ESG card-state recap"],
+    },
+    "regulatory_intro": {
+        "role": "Frame permitting maturity and interconnection readiness before the deterministic feasibility callout.",
+        "allowed_topics": ["regulatory maturity", "readiness", "permit posture"],
+        "forbidden_topics": ["duplicating the deterministic feasibility summary verbatim"],
+    },
+    "regulatory_closing": {
+        "role": "Short bridge from regulatory readiness into ESG discipline.",
+        "allowed_topics": ["execution readiness", "governance transition"],
+        "forbidden_topics": ["KPI enumeration"],
+    },
+    "esg_intro": {
+        "role": "Explain why ESG quality matters for this project and sector.",
+        "allowed_topics": ["ESG importance", "IFC-style framing", "export or supply-chain relevance when supported by context"],
+        "forbidden_topics": ["individual card-state recap as a checklist"],
     },
     "conclusion": {
-        "purpose": "Synthesize the teaser without repeating detailed KPI enumerations.",
+        "role": "Final investor summary of the full project.",
+        "allowed_topics": ["integrated investment thesis across technical, financial, regulatory, and ESG strengths"],
+        "forbidden_topics": ["raw repetition of every prior metric"],
     },
 }
 
@@ -731,15 +735,23 @@ def _count_words(value: str) -> int:
 
 def _build_teaser_narrative_system_prompt() -> str:
     return (
-        "You generate bounded narrative text for an executive investment teaser. "
-        "Use only the supplied structured teaser data. "
-        "Write every narrative field entirely in the language specified by request.language; when unspecified, default to Spanish ('es'). "
-        "Section boundaries are strict: overview must stay non-financial, section-specific, and reference-shaped, while financial details belong only in the financial section. "
-        "When a topic is forbidden for a section, omit it entirely even if it appears elsewhere in teaser_data. "
-        "Overview must not absorb raw regulatory framework codes, dates, hosting-capacity detail, or ESG card-state recap. "
-        "Do not invent numbers, dates, document states, ESG statuses, names, or locations. "
-        "Do not return HTML, markdown, bullet lists, tables, or extra keys. "
-        "Return valid JSON matching the requested schema exactly."
+        "You generate render-ready narrative fragments for an Executive Investment Summary teaser. "
+        "Use only the supplied structured teaser data and style reference. "
+        "Write entirely in the requested language. "
+        "Return valid JSON matching schema_version teaser_render_content_v2 exactly. "
+        "When teaser_data.project.description is present, treat it as core project context. "
+        "Use it to understand what the project does, who the beneficiary or offtaker is, and what commercial or operational problem the project is solving. "
+        "Use that context to make the overview and conclusion more specific. "
+        "Do not copy the description verbatim. "
+        "You are not writing six broad sections. "
+        "You are writing the exact text blocks that NestJS will inject into the HTML template. "
+        "Each field has a different job and must be written independently. "
+        "Do not merge fields. "
+        "Do not mention tables, cards, bullets, or HTML explicitly unless the field guidance asks for a transition toward them. "
+        "Do not invent numbers, dates, document states, ESG statuses, sector labels, names, or locations. "
+        "Do not output markdown, HTML, tables, or extra keys. "
+        "Use the style reference for tone, investor framing, and paragraph role. "
+        "Do not copy the style reference text verbatim."
     )
 
 
@@ -747,24 +759,23 @@ def _build_teaser_narrative_user_payload(
     req: TeaserNarrativeGenerationRequest,
 ) -> Dict[str, Any]:
     return {
-        "schema_version": "teaser_narrative_v1",
+        "schema_version": req.schema_version,
         "project_id": req.project_id,
         "project_name": req.project_name,
         "language": req.language,
         "tone": req.tone,
-        "word_budgets": req.word_budgets.model_dump(),
+        "style_reference_markdown": req.style_reference_markdown,
+        "field_budgets": req.field_budgets.model_dump(),
         "teaser_data": req.teaser_data,
-        "section_guidance": _TEASER_SECTION_GUIDANCE,
+        "field_guidance": _TEASER_RENDER_FIELD_GUIDANCE,
         "hard_rules": {
             "no_html": True,
             "no_markdown": True,
             "no_tables": True,
             "no_numeric_invention": True,
             "use_only_supplied_facts": True,
-            "keep_overview_non_financial": True,
-            "overview_forbids_raw_regulatory_detail": True,
-            "overview_forbids_esg_recap": True,
-            "overview_requires_reference_shaped_opportunity_summary": True,
+            "use_project_description_when_present": True,
+            "return_render_ready_content_fields": True,
         },
     }
 
@@ -819,9 +830,15 @@ def _validate_teaser_narrative_section_boundaries(
     req: TeaserNarrativeGenerationRequest,
     parsed: Dict[str, Any],
 ) -> None:
+    content = parsed.get("content") or {}
     overview_violations = _find_overview_boundary_violations(
         req,
-        parsed.get("overview", ""),
+        " ".join(
+            [
+                str(content.get("overview_intro") or ""),
+                str(content.get("overview_closing") or ""),
+            ]
+        ),
     )
     if overview_violations:
         raise RuntimeError(
@@ -830,15 +847,24 @@ def _validate_teaser_narrative_section_boundaries(
 
 
 def _build_teaser_narrative_response_schema() -> Dict[str, Any]:
-    properties = {field_name: {"type": "string"} for field_name in _TEASER_NARRATIVE_FIELDS}
+    content_properties = {
+        field_name: {"type": "string"} for field_name in _TEASER_RENDER_CONTENT_FIELDS
+    }
 
     return {
-        "name": "project_teaser_narrative_response",
+        "name": "project_teaser_render_content_response",
         "schema": {
             "type": "object",
             "additionalProperties": False,
-            "properties": properties,
-            "required": _TEASER_NARRATIVE_FIELDS,
+            "properties": {
+                "content": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": content_properties,
+                    "required": _TEASER_RENDER_CONTENT_FIELDS,
+                }
+            },
+            "required": ["content"],
         },
         "strict": True,
     }
@@ -854,6 +880,7 @@ def _extract_teaser_fallback_context(
     return {
         "teaser_data": teaser_data,
         "project_name": project.get("name") or req.project_name,
+        "description": project.get("description"),
         "country": narrative_context.get("country") or "el mercado objetivo",
         "industry": narrative_context.get("industry") or "el sector operativo del offtaker",
         "sector": narrative_context.get("offtakerSector")
@@ -864,128 +891,146 @@ def _extract_teaser_fallback_context(
     }
 
 
-def _build_fallback_financial_narrative(metrics: Dict[str, Any]) -> str:
-    total_dc = metrics.get("totalDcCapacityKw")
-    total_ac = metrics.get("totalAcCapacityKw")
-    annual_energy = metrics.get("annualEnergyProductionMwh")
-    ppa_years = metrics.get("ppaLengthYears")
-
+def _build_teaser_narrative_lenient_system_prompt() -> str:
     return (
-        "El posicionamiento financiero se basa en los datos estructurados del teaser recibidos desde NestJS. "
-        f"La configuración reportada indica {total_dc if total_dc is not None else 'una capacidad no disponible'} kWdc y {total_ac if total_ac is not None else 'una capacidad no disponible'} kWac, con una producción anual de {annual_energy if annual_energy is not None else 'valor no disponible'} MWh cuando está informada. "
-        f"El plazo comercial modelado es de {ppa_years if ppa_years is not None else 'duración no disponible'} años."
+        "You generate render-ready narrative fragments for an executive investment teaser. "
+        "Use only the supplied structured teaser data. "
+        "Write every content field entirely in the language specified by request.language; when unspecified, default to Spanish ('es'). "
+        "When teaser_data.project.description is present, use it as core project context without copying it verbatim. "
+        "Do not invent numbers, dates, document states, ESG statuses, names, or locations. "
+        "Do not return HTML, markdown, bullet lists, tables, or extra keys. "
+        "Word budgets and section-boundary rules are relaxed for this call; focus on producing readable, investor-facing prose. "
+        "Return valid JSON matching the requested schema exactly."
     )
 
 
-def _build_fallback_technical_narrative(technical_data: Dict[str, Any]) -> str:
-    return (
-        "El comentario técnico se mantiene limitado a los equipos mapeados y a los valores provenientes de la simulación. "
-        f"Las referencias actuales de equipamiento apuntan a {technical_data.get('solarModuleBrand') or 'un proveedor de módulos no especificado'} para módulos y a {technical_data.get('inverterBrand') or 'un proveedor de inversores no especificado'} para inversores. "
-        "Los supuestos de garantía y pérdidas deben leerse junto con la tabla técnica estructurada del teaser."
-    )
-
-
-def _build_fallback_esg_narrative(
-    project_name: str,
-    sector: str,
-    esg: Dict[str, Any],
-) -> str:
-    delivered_count = sum(
-        1 for card in esg.values() if isinstance(card, dict) and card.get("state") == "delivered"
-    )
-    total_cards = sum(1 for card in esg.values() if isinstance(card, dict))
-
-    return (
-        f"La cobertura ESG de {project_name} se deriva de los estados fijos de las tarjetas del teaser y no de inferencia libre del modelo. "
-        f"La carga estructurada actual muestra {delivered_count} elementos entregados de {total_cards} tarjetas ESG monitoreadas, cubriendo evidencia relevante del contratista y del offtaker para {sector}."
-    )
-
-
-def _build_fallback_teaser_narrative(
-    req: TeaserNarrativeGenerationRequest, reason: str
+def _generate_teaser_narrative_lenient(
+    req: TeaserNarrativeGenerationRequest,
+    original_failure_reason: str,
 ) -> TeaserNarrativeGenerationResponse:
-    context = _extract_teaser_fallback_context(req)
-    teaser_data = context["teaser_data"]
-    project_name = context["project_name"]
-    country = context["country"]
-    industry = context["industry"]
-    sector = context["sector"]
-    investment_angle = context["investment_angle"]
+    """
+    Lenient LLM call used when the strict call fails validation.
+    No word-budget or section-boundary enforcement — just produce clean prose.
+    Only called when the LLM itself is reachable; network/auth errors skip this.
+    """
+    from openai import OpenAI
 
-    metrics = teaser_data.get("metrics") or {}
-    technical_data = teaser_data.get("technical") or {}
-    regulatory_data = teaser_data.get("regulatory") or {}
-    esg = teaser_data.get("esg") or {}
-    regulatory_feasibility = regulatory_data.get("feasibilityIssued")
-    delivered_count = sum(
-        1 for card in esg.values() if isinstance(card, dict) and card.get("state") == "delivered"
+    model_name = req.model or os.getenv("SUMMARY_MODEL") or os.getenv("LLM_MODEL")
+    model_name = model_name or "gpt-5-nano-2025-08-07"
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is not configured")
+
+    client = OpenAI(api_key=api_key)
+
+    user_prompt = (
+        "Generate teaser render content JSON using this payload. "
+        "The previous strict attempt was rejected for: "
+        f"{original_failure_reason}\n\n"
+        "Produce clean investor-facing prose. "
+        "Ignore word budgets and section boundary enforcement for this call.\n\n"
+        f"{json.dumps(_build_teaser_narrative_user_payload(req), ensure_ascii=False)}"
     )
-    total_cards = sum(1 for card in esg.values() if isinstance(card, dict))
 
-    overview_signals: List[str] = []
-
-    if regulatory_feasibility == "Yes":
-        overview_signals.append("documented grid-feasibility status")
-    elif regulatory_data.get("feasibilitySummary"):
-        overview_signals.append("partial regulatory visibility")
-
-    if (
-        metrics.get("totalDcCapacityKw") is not None
-        or metrics.get("performanceRatioPct") is not None
-        or metrics.get("dcAcRatio") is not None
-    ):
-        overview_signals.append("documented technical configuration")
-
-    if delivered_count > 0:
-        overview_signals.append(
-            "broad delivered ESG evidence"
-            if delivered_count >= 4
-            else "partial delivered ESG evidence"
-        )
-
-    if not overview_signals:
-        overview_focus = "project positioning, technical configuration, regulatory feasibility, and ESG delivery status"
-    elif len(overview_signals) == 1:
-        overview_focus = overview_signals[0]
-    elif len(overview_signals) == 2:
-        overview_focus = f"{overview_signals[0]} and {overview_signals[1]}"
-    else:
-        overview_focus = f"{overview_signals[0]}, {overview_signals[1]}, and {overview_signals[2]}"
-
-    overview = (
-        f"{project_name} se presenta como una oportunidad de inversión solar en {country}. "
-        f"La oportunidad se posiciona alrededor de {industry}, con foco en la identidad del proyecto, su configuración técnica, la viabilidad regulatoria y el estado general de avance ESG. "
-        f"El encuadre actual del proyecto enfatiza {overview_focus}."
+    completion = client.chat.completions.create(
+        model=model_name,
+        messages=[
+            {"role": "system", "content": _build_teaser_narrative_lenient_system_prompt()},
+            {"role": "user", "content": user_prompt},
+        ],
+        response_format={
+            "type": "json_schema",
+            "json_schema": _build_teaser_narrative_response_schema(),
+        },
     )
-    financial = _build_fallback_financial_narrative(metrics)
-    technical = _build_fallback_technical_narrative(technical_data)
 
-    regulatory = (
-        regulatory_data.get("feasibilitySummary")
-        or "El comentario regulatorio queda limitado a los datos mapeados de factibilidad, y el teaser debe apoyarse en el resumen regulatorio estructurado cuando la generación narrativa no esté disponible."
-    )
-    esg_text = _build_fallback_esg_narrative(project_name, sector, esg)
+    content = completion.choices[0].message.content if completion.choices else None
+    if not content:
+        raise RuntimeError("LLM returned empty response in lenient fallback call")
 
-    conclusion = (
-        f"En conjunto, {project_name} debe evaluarse primero a través de las métricas estructuradas del teaser y de la evidencia de soporte disponible. "
-        f"La capa narrativa está operando en modo determinístico de respaldo porque la respuesta de IA no estuvo disponible o no fue válida ({reason})."
-    )
+    parsed = json.loads(content)
+    render_content = TeaserRenderContent.model_validate(parsed.get("content", {}))
 
     return TeaserNarrativeGenerationResponse(
         generated_at=_utc_now_iso(),
         project_id=req.project_id,
         project_name=req.project_name,
         language=req.language,
-        model_version="fallback-rule-based",
-        overview=overview,
-        financial=financial,
-        technical=technical,
-        regulatory=regulatory,
-        esg=esg_text,
-        conclusion=conclusion,
+        model_version=getattr(completion, "model", model_name),
+        content=render_content,
         quality_checks={
             "within_budget": False,
-            "fallback_reason": reason,
+            "lenient_fallback": True,
+            "original_failure_reason": original_failure_reason,
+        },
+        generation_mode="fallback",
+    )
+
+
+def _build_fallback_teaser_narrative(
+    req: TeaserNarrativeGenerationRequest, reason: str
+) -> TeaserNarrativeGenerationResponse:
+    """
+    Last-resort fallback used only when the LLM itself is unreachable
+    (no API key, network error, auth failure).
+    Returns minimal neutral placeholders — never embeds system names or raw errors.
+    """
+    context = _extract_teaser_fallback_context(req)
+    project_name = context["project_name"]
+    has_description = bool(_safe_str(context.get("description")).strip())
+
+    overview_intro = (
+        f"{project_name} representa una oportunidad de inversión en infraestructura solar fotovoltaica. "
+        "Los parámetros técnicos y financieros del proyecto se encuentran disponibles en las secciones estructuradas del teaser."
+    )
+    if has_description:
+        overview_intro += (
+            " La descripción del proyecto aporta contexto operativo adicional para orientar la evaluación."
+        )
+
+    return TeaserNarrativeGenerationResponse(
+        generated_at=_utc_now_iso(),
+        project_id=req.project_id,
+        project_name=req.project_name,
+        language=req.language,
+        model_version="unavailable",
+        content=TeaserRenderContent(
+            overview_intro=overview_intro,
+            overview_closing=(
+                "La lectura inicial del proyecto debe complementarse con las métricas, tablas y evidencia documental del teaser."
+            ),
+            financial_intro=(
+                "Los aspectos financieros clave del proyecto se detallan en las métricas estructuradas del teaser."
+            ),
+            financial_body=(
+                "La información de CAPEX, retorno, cobertura y estructura comercial debe revisarse directamente en los indicadores financieros disponibles."
+            ),
+            financial_closing=(
+                "La evaluación financiera debe leerse junto con la configuración técnica y el estado documental del proyecto."
+            ),
+            technical_intro=(
+                "Las especificaciones técnicas y de equipamiento se encuentran disponibles en la tabla de datos del teaser."
+            ),
+            technical_closing=(
+                "La información técnica disponible sirve como base para revisar desempeño, garantías y riesgos de ejecución."
+            ),
+            regulatory_intro=(
+                "El estado regulatorio del proyecto se presenta en el resumen de factibilidad eléctrica estructurado."
+            ),
+            regulatory_closing=(
+                "La evidencia regulatoria debe revisarse junto con los documentos de soporte disponibles."
+            ),
+            esg_intro=(
+                f"La evidencia ESG de {project_name} se resume en las tarjetas de estado del teaser."
+            ),
+            conclusion=(
+                f"{project_name} debe evaluarse a través de las métricas estructuradas del teaser y la evidencia documental disponible."
+            ),
+        ),
+        quality_checks={
+            "within_budget": False,
+            "service_unavailable": True,
         },
         generation_mode="fallback",
     )
@@ -995,20 +1040,24 @@ def _validate_teaser_narrative_budgets(
     req: TeaserNarrativeGenerationRequest,
     parsed: Dict[str, Any],
 ) -> Dict[str, int]:
-    section_word_counts: Dict[str, int] = {}
+    field_word_counts: Dict[str, int] = {}
+    content = parsed.get("content")
 
-    for field_name in _TEASER_NARRATIVE_FIELDS:
-        text = parsed.get(field_name, "")
+    if not isinstance(content, dict):
+        raise RuntimeError("Teaser narrative response did not include a content object")
+
+    for field_name in _TEASER_RENDER_CONTENT_FIELDS:
+        text = content.get(field_name, "")
         word_count = _count_words(text)
-        section_word_counts[field_name] = word_count
+        field_word_counts[field_name] = word_count
 
-        budget = getattr(req.word_budgets, field_name)
+        budget = getattr(req.field_budgets, field_name)
         if word_count < budget.min_words or word_count > budget.max_words:
             raise RuntimeError(
-                f"Teaser narrative field '{field_name}' violated word budget: {word_count} words, expected {budget.min_words}-{budget.max_words}"
+                f"Teaser render content field '{field_name}' violated word budget: {word_count} words, expected {budget.min_words}-{budget.max_words}"
             )
 
-    return section_word_counts
+    return field_word_counts
 
 
 def _generate_teaser_narrative_with_openai(
@@ -1027,7 +1076,7 @@ def _generate_teaser_narrative_with_openai(
 
     def request_completion(repair_note: Optional[str] = None):
         user_prompt = (
-            "Generate teaser narrative JSON using this payload:\n"
+            "Generate teaser render content JSON using this payload:\n"
             f"{json.dumps(_build_teaser_narrative_user_payload(req), ensure_ascii=False)}"
         )
         if repair_note:
@@ -1054,17 +1103,21 @@ def _generate_teaser_narrative_with_openai(
             raise RuntimeError("LLM returned empty response for teaser narrative generation")
 
         parsed = json.loads(content)
-        section_word_counts = _validate_teaser_narrative_budgets(req, parsed)
+        field_word_counts = _validate_teaser_narrative_budgets(req, parsed)
         _validate_teaser_narrative_section_boundaries(req, parsed)
-        return parsed, section_word_counts
+        return parsed, field_word_counts
 
     completion = request_completion()
 
     try:
-        parsed, section_word_counts = parse_and_validate(completion)
+        parsed, field_word_counts = parse_and_validate(completion)
     except RuntimeError as first_error:
+        # One strict repair attempt first; if it still fails validation, raise
+        # so the caller can escalate to the lenient path.
         completion = request_completion(str(first_error))
-        parsed, section_word_counts = parse_and_validate(completion)
+        parsed, field_word_counts = parse_and_validate(completion)
+
+    render_content = TeaserRenderContent.model_validate(parsed.get("content", {}))
 
     return TeaserNarrativeGenerationResponse(
         generated_at=_utc_now_iso(),
@@ -1072,18 +1125,29 @@ def _generate_teaser_narrative_with_openai(
         project_name=req.project_name,
         language=req.language,
         model_version=getattr(completion, "model", model_name),
-        overview=parsed.get("overview", ""),
-        financial=parsed.get("financial", ""),
-        technical=parsed.get("technical", ""),
-        regulatory=parsed.get("regulatory", ""),
-        esg=parsed.get("esg", ""),
-        conclusion=parsed.get("conclusion", ""),
+        content=render_content,
         quality_checks={
             "within_budget": True,
-            "word_counts": section_word_counts,
+            "field_word_counts": field_word_counts,
         },
         generation_mode="llm",
     )
+
+
+# Errors that indicate the LLM service itself is unreachable or misconfigured.
+# For these we skip the lenient LLM retry and go straight to the neutral placeholder.
+_LLM_UNREACHABLE_MARKERS = (
+    "OPENAI_API_KEY is not configured",
+    "Connection error",
+    "AuthenticationError",
+    "RateLimitError",
+    "APIConnectionError",
+)
+
+
+def _is_llm_unreachable_error(exc: Exception) -> bool:
+    msg = str(exc)
+    return any(marker in msg for marker in _LLM_UNREACHABLE_MARKERS)
 
 
 async def generate_teaser_narrative(
@@ -1115,10 +1179,36 @@ async def generate_teaser_narrative(
         return result
     except Exception as e:
         log.warning(
-            "Teaser narrative falling back for project=%s: %s",
+            "Teaser narrative strict call failed for project=%s: %s",
             req.project_id,
             e,
         )
+
+        # If the LLM is reachable, try a lenient call (no budget/boundary rules).
+        if not _is_llm_unreachable_error(e):
+            try:
+                lenient_result = await asyncio.to_thread(
+                    _generate_teaser_narrative_lenient, req, str(e)
+                )
+                _persist_summary_trace(
+                    request_payload,
+                    lenient_result.model_dump(),
+                    status="lenient_fallback",
+                    error=str(e),
+                )
+                log.info(
+                    "Teaser narrative lenient fallback done: project=%s",
+                    req.project_id,
+                )
+                return lenient_result
+            except Exception as lenient_e:
+                log.warning(
+                    "Teaser narrative lenient call also failed for project=%s: %s",
+                    req.project_id,
+                    lenient_e,
+                )
+
+        # LLM is unreachable or both calls failed — use minimal neutral placeholders.
         fallback_result = _build_fallback_teaser_narrative(req, str(e))
         _persist_summary_trace(
             request_payload,

@@ -473,21 +473,89 @@ class TeaserNarrativeWordBudgets(BaseModel):
     )
 
 
+class TeaserRenderContentFieldBudgets(BaseModel):
+    """Field-specific word budgets for render-ready teaser content."""
+
+    overview_intro: TeaserNarrativeWordBudget = Field(
+        default_factory=lambda: TeaserNarrativeWordBudget(min_words=90, max_words=130)
+    )
+    overview_closing: TeaserNarrativeWordBudget = Field(
+        default_factory=lambda: TeaserNarrativeWordBudget(min_words=30, max_words=55)
+    )
+    financial_intro: TeaserNarrativeWordBudget = Field(
+        default_factory=lambda: TeaserNarrativeWordBudget(min_words=35, max_words=60)
+    )
+    financial_body: TeaserNarrativeWordBudget = Field(
+        default_factory=lambda: TeaserNarrativeWordBudget(min_words=60, max_words=95)
+    )
+    financial_closing: TeaserNarrativeWordBudget = Field(
+        default_factory=lambda: TeaserNarrativeWordBudget(min_words=25, max_words=45)
+    )
+    technical_intro: TeaserNarrativeWordBudget = Field(
+        default_factory=lambda: TeaserNarrativeWordBudget(min_words=55, max_words=90)
+    )
+    technical_closing: TeaserNarrativeWordBudget = Field(
+        default_factory=lambda: TeaserNarrativeWordBudget(min_words=25, max_words=45)
+    )
+    regulatory_intro: TeaserNarrativeWordBudget = Field(
+        default_factory=lambda: TeaserNarrativeWordBudget(min_words=40, max_words=70)
+    )
+    regulatory_closing: TeaserNarrativeWordBudget = Field(
+        default_factory=lambda: TeaserNarrativeWordBudget(min_words=20, max_words=40)
+    )
+    esg_intro: TeaserNarrativeWordBudget = Field(
+        default_factory=lambda: TeaserNarrativeWordBudget(min_words=60, max_words=100)
+    )
+    conclusion: TeaserNarrativeWordBudget = Field(
+        default_factory=lambda: TeaserNarrativeWordBudget(min_words=75, max_words=120)
+    )
+
+
+class TeaserRenderContent(BaseModel):
+    """Render-ready teaser prose fields consumed directly by NestJS."""
+
+    overview_intro: str
+    overview_closing: str
+    financial_intro: str
+    financial_body: str
+    financial_closing: str
+    technical_intro: str
+    technical_closing: str
+    regulatory_intro: str
+    regulatory_closing: str
+    esg_intro: str
+    conclusion: str
+
+
 class TeaserNarrativeGenerationRequest(BaseModel):
     """Request contract for teaser narrative generation from NestJS."""
 
     project_id: str
     project_name: str
+    schema_version: str = Field(
+        "teaser_render_content_v2",
+        description="Teaser narrative schema version requested by NestJS",
+    )
     language: str = Field("es", description="Output language code")
     tone: str = Field(
         "institutional-investment-brief",
         description="Tone guidance for the teaser narrative",
     )
+    style_reference_markdown: Optional[str] = Field(
+        None,
+        description="Optional style reference markdown for tone and section role guidance",
+    )
     teaser_data: Dict[str, Any] = Field(
         ...,
         description="Structured teaser data assembled in NestJS",
     )
-    word_budgets: TeaserNarrativeWordBudgets = Field(default_factory=TeaserNarrativeWordBudgets)
+    field_budgets: TeaserRenderContentFieldBudgets = Field(
+        default_factory=TeaserRenderContentFieldBudgets
+    )
+    word_budgets: Optional[TeaserNarrativeWordBudgets] = Field(
+        None,
+        description="Deprecated v1 section budgets; retained for tolerant older callers",
+    )
     model: Optional[str] = Field(None, description="Optional model override")
 
 
@@ -499,12 +567,7 @@ class TeaserNarrativeGenerationResponse(BaseModel):
     project_name: str
     language: str
     model_version: str
-    overview: str
-    financial: str
-    technical: str
-    regulatory: str
-    esg: str
-    conclusion: str
+    content: TeaserRenderContent
     quality_checks: Dict[str, Any] = Field(default_factory=dict)
     generation_mode: str = Field(..., description="'llm' or 'fallback'")
 

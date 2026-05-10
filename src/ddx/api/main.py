@@ -484,10 +484,10 @@ async def endpoint_validation_correction(req: ValidationCorrectionRequest):
     "/api/v1/teaser/narrative/generate",
     response_model=TeaserNarrativeGenerationResponse,
     tags=["Teaser"],
-    summary="Generate bounded teaser narrative from NestJS teaser payload",
+    summary="Generate render-ready teaser content from NestJS teaser payload",
     description=(
-        "Receives structured teaser data from NestJS and returns only the bounded "
-        "narrative fields needed by the teaser renderer."
+        "Receives structured teaser data from NestJS and returns render-ready "
+        "content fields that map directly to the teaser HTML renderer."
     ),
 )
 async def endpoint_generate_teaser_narrative(req: TeaserNarrativeGenerationRequest):
@@ -495,12 +495,13 @@ async def endpoint_generate_teaser_narrative(req: TeaserNarrativeGenerationReque
     Teaser narrative generation for the Executive Investment Summary flow.
 
     **When to use:** NestJS has already assembled deterministic teaser data and
-    needs bounded prose only for the narrative fields.
+    needs bounded prose for the exact teaser render fields.
 
     **AI Responsibility:**
-    - Generate only overview, financial, technical, regulatory, ESG, and conclusion prose
+    - Generate only the content.* fields requested by schema_version teaser_render_content_v2
     - Use only supplied facts
-    - Respect per-section word budgets
+    - Use project.description as context when present without copying it verbatim
+    - Respect per-field word budgets
     """
     try:
         log.info(
@@ -508,6 +509,7 @@ async def endpoint_generate_teaser_narrative(req: TeaserNarrativeGenerationReque
             req.project_id,
             req.language,
         )
+        log.info("data coming from nest.js: %s", req)
         result = await generate_teaser_narrative(req)
         log.info(
             "Teaser narrative generated: project=%s, mode=%s",
