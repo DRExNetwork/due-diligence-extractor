@@ -45,7 +45,7 @@ from ddx.classification.extraction_api import (
 )
 from ddx.classification.categories import TopLevelCategory
 from ddx.classification.landing_ai_poc_sdk import should_disable_cross_document_validation
-from ddx.classification.categories import DocumentType
+from ddx.classification.categories import DocumentType, DOCUMENT_TYPE_PARENT_REQUIREMENT
 from ddx.api.equipment_research import run_equipment_research_async
 
 from ddx.api.models import (
@@ -150,9 +150,35 @@ _UNCATEGORIZED_DOCUMENT_TYPE = "Uncategorized Document"
 def _is_equipment_sheets_document_type(document_type: Optional[str]) -> bool:
     if not document_type:
         return False
-    return _slug_document_type(document_type) == _slug_document_type(
+    if _slug_document_type(document_type) == _slug_document_type(
         DocumentType.PROJECT_DATA_EQUIPMENT_SHEETS.value
-    )
+    ):
+        return True
+    # Sub-types (cert/bloomberg evidence) map to equipment sheets for research purposes
+    try:
+        dt = DocumentType(document_type)
+        return (
+            DOCUMENT_TYPE_PARENT_REQUIREMENT.get(dt) == DocumentType.PROJECT_DATA_EQUIPMENT_SHEETS
+        )
+    except ValueError:
+        return False
+
+
+def _get_requirement_document_type(doc_type: str) -> str:
+    """Return the canonical requirement document type for NestJS DB lookup.
+
+    Sub-types (Module IEC Certificate, Inverter Bloomberg Evidence, etc.) have no
+    independent DB entry and must be resolved to their parent requirement type so
+    that NestJS can find the correct row in the requirements table.
+    """
+    try:
+        dt = DocumentType(doc_type)
+        parent = DOCUMENT_TYPE_PARENT_REQUIREMENT.get(dt)
+        if parent:
+            return parent.value
+    except ValueError:
+        pass
+    return doc_type
 
 
 def _clean_brand(value: Any) -> Optional[str]:
@@ -683,7 +709,11 @@ _TEASER_RENDER_FIELD_GUIDANCE: Dict[str, Dict[str, Any]] = {
     },
     "financial_intro": {
         "role": "Introduce the financial viability of the project.",
-        "allowed_topics": ["overall profitability framing", "capital discipline", "financing readiness"],
+        "allowed_topics": [
+            "overall profitability framing",
+            "capital discipline",
+            "financing readiness",
+        ],
         "forbidden_topics": ["equipment detail", "ESG detail"],
     },
     "financial_body": {
@@ -718,12 +748,18 @@ _TEASER_RENDER_FIELD_GUIDANCE: Dict[str, Dict[str, Any]] = {
     },
     "esg_intro": {
         "role": "Explain why ESG quality matters for this project and sector.",
-        "allowed_topics": ["ESG importance", "IFC-style framing", "export or supply-chain relevance when supported by context"],
+        "allowed_topics": [
+            "ESG importance",
+            "IFC-style framing",
+            "export or supply-chain relevance when supported by context",
+        ],
         "forbidden_topics": ["individual card-state recap as a checklist"],
     },
     "conclusion": {
         "role": "Final investor summary of the full project.",
-        "allowed_topics": ["integrated investment thesis across technical, financial, regulatory, and ESG strengths"],
+        "allowed_topics": [
+            "integrated investment thesis across technical, financial, regulatory, and ESG strengths"
+        ],
         "forbidden_topics": ["raw repetition of every prior metric"],
     },
 }
@@ -985,9 +1021,7 @@ def _build_fallback_teaser_narrative(
         "Los parámetros técnicos y financieros del proyecto se encuentran disponibles en las secciones estructuradas del teaser."
     )
     if has_description:
-        overview_intro += (
-            " La descripción del proyecto aporta contexto operativo adicional para orientar la evaluación."
-        )
+        overview_intro += " La descripción del proyecto aporta contexto operativo adicional para orientar la evaluación."
 
     return TeaserNarrativeGenerationResponse(
         generated_at=_utc_now_iso(),
@@ -1592,6 +1626,9 @@ async def targeted_completion(req: TargetedCompletionRequest) -> TargetedComplet
     for the given document type.
     """
     doc_type, top_level_str = _resolve_document_type(req.document_type)
+    # Sub-types (e.g. "Module IEC Certificate") have no independent DB entry in NestJS.
+    # Resolve to the parent requirement type so callers can look up the correct DB row.
+    response_doc_type = _get_requirement_document_type(doc_type)
 
     temp_dir = None
     try:
@@ -1599,7 +1636,7 @@ async def targeted_completion(req: TargetedCompletionRequest) -> TargetedComplet
         resolved = ResolvedFiles(req.s3_paths, path_mapping)
 
         if resolved.is_empty:
-            return _build_empty_targeted_response(req, top_level_str, doc_type)
+            return _build_empty_targeted_response(req, top_level_str, response_doc_type)
 
         enable_validation = True
         if should_disable_cross_document_validation(doc_type):
@@ -1631,7 +1668,7 @@ async def targeted_completion(req: TargetedCompletionRequest) -> TargetedComplet
         return _assemble_targeted_response(
             req,
             top_level_str,
-            doc_type,
+            response_doc_type,
             results_list,
             validated_result,
             resolved,
