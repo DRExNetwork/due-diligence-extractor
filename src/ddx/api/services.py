@@ -830,7 +830,9 @@ def _find_overview_boundary_violations(
         (r"\bppa\b", "financial KPI mention (PPA)"),
         (r"\busd\b", "currency-specific financial detail"),
         (r"\biva\b", "VAT-specific financial detail"),
-        (r"\bofftaker\b", "capital-structure detail"),
+        # NOTE: 'offtaker' is an explicitly allowed topic in overview_intro (offtaker sector),
+        # so we do not block it here. 'equity' and 'debt' remain blocked as capital-structure
+        # detail that must stay in the financial section.
         (r"\bequity\b", "capital-structure detail"),
         (r"\bdebt\b", "capital-structure detail"),
     ]
@@ -867,14 +869,13 @@ def _validate_teaser_narrative_section_boundaries(
     parsed: Dict[str, Any],
 ) -> None:
     content = parsed.get("content") or {}
+    # Only validate overview_intro for boundary violations. overview_closing is an intentional
+    # bridge into the key metrics table and may gesture at financial framing without including
+    # raw figures. Checking both fields combined caused excessive false-positives that triggered
+    # the lenient-fallback cascade on every generation attempt.
     overview_violations = _find_overview_boundary_violations(
         req,
-        " ".join(
-            [
-                str(content.get("overview_intro") or ""),
-                str(content.get("overview_closing") or ""),
-            ]
-        ),
+        str(content.get("overview_intro") or ""),
     )
     if overview_violations:
         raise RuntimeError(
