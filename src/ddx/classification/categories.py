@@ -4,6 +4,7 @@
 Document categories and extraction schemas for due diligence documents.
 Supports two-level categorization: Top-level category → Document type
 """
+
 from __future__ import annotations
 
 import re
@@ -12,7 +13,6 @@ from typing import Any, Dict, List, Literal, Optional, Tuple, Type
 from urllib.parse import quote
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-
 
 # =============================================================================
 # Top-Level Categories (Level 1)
@@ -73,6 +73,10 @@ class DocumentType(str, Enum):
     # Technical Documents
     PROJECT_SIMULATION_REPORT = "Project Simulation Report"
     PROJECT_DATA_EQUIPMENT_SHEETS = "Project Data Main Equipment Sheets"
+    MODULE_IEC_CERTIFICATE = "Module IEC Certificate"
+    INVERTER_IEC_CERTIFICATE = "Inverter IEC Certificate"
+    MODULE_BLOOMBERG_EVIDENCE = "Module Bloomberg Evidence"
+    INVERTER_BLOOMBERG_EVIDENCE = "Inverter Bloomberg Evidence"
     PROJECT_BASIC_ENGINEERING = "Project Basic Engineering"
     PROJECT_VISIT_REPORT = "Project Visit Report"
     PROJECT_LAYOUT = "Project Layout"
@@ -121,6 +125,10 @@ DOCUMENT_TYPE_TO_TOP_LEVEL: dict[DocumentType, TopLevelCategory] = {
     # Technical
     DocumentType.PROJECT_SIMULATION_REPORT: TopLevelCategory.TECHNICAL,
     DocumentType.PROJECT_DATA_EQUIPMENT_SHEETS: TopLevelCategory.TECHNICAL,
+    DocumentType.MODULE_IEC_CERTIFICATE: TopLevelCategory.TECHNICAL,
+    DocumentType.INVERTER_IEC_CERTIFICATE: TopLevelCategory.TECHNICAL,
+    DocumentType.MODULE_BLOOMBERG_EVIDENCE: TopLevelCategory.TECHNICAL,
+    DocumentType.INVERTER_BLOOMBERG_EVIDENCE: TopLevelCategory.TECHNICAL,
     DocumentType.PROJECT_BASIC_ENGINEERING: TopLevelCategory.TECHNICAL,
     DocumentType.PROJECT_VISIT_REPORT: TopLevelCategory.TECHNICAL,
     DocumentType.PROJECT_LAYOUT: TopLevelCategory.TECHNICAL,
@@ -159,6 +167,10 @@ DOCUMENT_TYPE_DESCRIPTIONS: dict[DocumentType, str] = {
     # Technical
     DocumentType.PROJECT_SIMULATION_REPORT: "Technical simulation results and performance analysis for the solar project (PVsyst/Helioscope)",
     DocumentType.PROJECT_DATA_EQUIPMENT_SHEETS: "Equipment specifications including solar modules, inverters, and mounting structures",
+    DocumentType.MODULE_IEC_CERTIFICATE: "Third-party IEC certificate for a solar module. Extract the IEC standard code and certificate validity/expiry date.",
+    DocumentType.INVERTER_IEC_CERTIFICATE: "Third-party IEC certificate for an inverter. Extract the IEC standard code and certificate validity/expiry date.",
+    DocumentType.MODULE_BLOOMBERG_EVIDENCE: "BloombergNEF or Bloomberg evidence document for a solar module brand. Extract only the rating or qualification shown.",
+    DocumentType.INVERTER_BLOOMBERG_EVIDENCE: "BloombergNEF or Bloomberg evidence document for an inverter brand. Extract only the rating or qualification shown.",
     DocumentType.PROJECT_BASIC_ENGINEERING: "Fundamental engineering design and technical specifications",
     DocumentType.PROJECT_VISIT_REPORT: "Field visit observations and assessment findings",
     DocumentType.PROJECT_LAYOUT: "Spatial arrangement and layout diagrams of the project",
@@ -1985,14 +1997,6 @@ class NonOverlapProtectedAreasCertificateData(BaseModel):
         description="Geographic reference (coordinates or location reference)",
     )
     issuing_authority: Optional[str] = Field(default=None, description="Issuing authority")
-    date_of_issuance: Optional[str] = Field(
-        default=None,
-        description="Date of issuance (YYYY-MM-DD)",
-    )
-    validity_date: Optional[str] = Field(
-        default=None,
-        description="Validity date (YYYY-MM-DD)",
-    )
 
 
 class HRPolicyCodeOfConductData(BaseModel):
@@ -2317,6 +2321,42 @@ class PermitsData(BaseModel):
     )
 
 
+class IECCertificateEvidenceData(BaseModel):
+    """Schema for a standalone IEC certificate uploaded for module or inverter evidence."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    standard_code: Optional[str] = Field(
+        default=None,
+        description=(
+            "IEC standard code explicitly confirmed in the certificate, e.g. IEC 61215, "
+            "IEC 61730, IEC TS 62804, IEC 62716, IEC 61701, IEC 62109, IEC 61727, IEC 61000. "
+            "Return null if the document does not confirm an IEC standard."
+        ),
+    )
+    validity_date: Optional[str] = Field(
+        default=None,
+        description=(
+            "Certificate validity or expiry date in YYYY-MM-DD format. "
+            "Return null if the document does not state a validity or expiry date."
+        ),
+    )
+
+
+class BloombergEvidenceData(BaseModel):
+    """Schema for a standalone Bloomberg evidence document uploaded for module or inverter."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rating: Optional[str] = Field(
+        default=None,
+        description=(
+            "BloombergNEF or Bloomberg qualification or rating explicitly shown in the document, "
+            "for example AAA, AA, A, or Tier 1. Return null if no rating is confirmed."
+        ),
+    )
+
+
 # =============================================================================
 # Classification Result Schema
 # =============================================================================
@@ -2374,6 +2414,11 @@ PYDANTIC_MODELS: dict[DocumentType, Type[BaseModel]] = {
     DocumentType.LAND_USE_PERMIT: LandUsePermitData,
     # Permits
     DocumentType.ELECTRICAL_UTILITY_FEASIBILITY_REPORT: ElectricalUtilityFeasibilityReportData,
+    # Equipment evidence (standalone uploads)
+    DocumentType.MODULE_IEC_CERTIFICATE: IECCertificateEvidenceData,
+    DocumentType.INVERTER_IEC_CERTIFICATE: IECCertificateEvidenceData,
+    DocumentType.MODULE_BLOOMBERG_EVIDENCE: BloombergEvidenceData,
+    DocumentType.INVERTER_BLOOMBERG_EVIDENCE: BloombergEvidenceData,
 }
 
 # Add Technical + Uncategorized schemas from landing_ai_poc_sdk2
@@ -2406,6 +2451,21 @@ try:
     )
 except Exception:
     pass
+
+
+# =============================================================================
+# Sub-type → Parent Requirement Mapping
+# =============================================================================
+
+# These document types are used only for targeted extraction schema selection.
+# They have no independent entry in the requirements database and must be
+# reported back to NestJS as their parent requirement type.
+DOCUMENT_TYPE_PARENT_REQUIREMENT: dict[DocumentType, DocumentType] = {
+    DocumentType.MODULE_IEC_CERTIFICATE: DocumentType.PROJECT_DATA_EQUIPMENT_SHEETS,
+    DocumentType.INVERTER_IEC_CERTIFICATE: DocumentType.PROJECT_DATA_EQUIPMENT_SHEETS,
+    DocumentType.MODULE_BLOOMBERG_EVIDENCE: DocumentType.PROJECT_DATA_EQUIPMENT_SHEETS,
+    DocumentType.INVERTER_BLOOMBERG_EVIDENCE: DocumentType.PROJECT_DATA_EQUIPMENT_SHEETS,
+}
 
 
 def get_extraction_model(document_type: DocumentType) -> Optional[Type[BaseModel]]:

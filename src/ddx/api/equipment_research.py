@@ -70,19 +70,36 @@ INVERTER_TESTS: List[Dict[str, str]] = [
 
 
 def _default_payload(module_brand: Optional[str], inverter_brand: Optional[str]) -> Dict[str, Any]:
+    """Build the starting payload for equipment research.
+
+    Repeated fields are pre-populated with one placeholder row per known
+    standard/test so that NestJS always writes a variable row (with a
+    variableId) even when research cannot run because a brand is missing.
+    When research succeeds it calls payload.update(...) which overwrites these
+    placeholders with real data.
+    """
     return {
         "module_brand": module_brand or "",
         "module_bloomberg": {"rating": "Unknown", "source": ""},
-        "module_certifications": [],
-        "module_certificate_evidence": [],
+        "module_certificate_evidence": [
+            {"standard_code": std["code"], "certificate_name": None, "source": None, "validity_date": None}
+            for std in IEC_STANDARDS
+        ],
         "module_factory_test_date": None,
-        "module_test_evidence": [],
+        "module_test_evidence": [
+            {"test_name": test["test_name"], "source": None, "test_date": None}
+            for test in SOLAR_MODULE_TESTS
+        ],
         "inverter_brand": inverter_brand or "",
         "inverter_bloomberg": {"rating": "Unknown", "source": ""},
-        "inverter_certifications": [],
-        "inverter_certificate_evidence": [],
-        "inverter_anti_island_test_date": None,
-        "inverter_test_evidence": [],
+        "inverter_certificate_evidence": [
+            {"standard_code": std["code"], "certificate_name": None, "source": None, "validity_date": None}
+            for std in IEC_INVERTER_STANDARDS
+        ],
+        "inverter_test_evidence": [
+            {"test_name": test["test_name"], "source": None, "test_date": None}
+            for test in INVERTER_TESTS
+        ],
     }
 
 
