@@ -37,22 +37,7 @@ from ddx.classification.categories import (
     normalize_extracted_document,
 )
 from ddx.classification.landing_ai_poc_sdk import (
-    # Schemas (for type hints)
-    ProjectSimulationReportData,
-    ProjectDataMainEquipmentSheetsData,
-    ProjectBasicEngineeringData,
-    ProjectVisitReportData,
-    ProjectLayoutData,
-    KmzPoligonData,
-    CableSizingCalculationReportData,
-    GroundingSystemSingleLineDiagramData,
-    UncategorizedDocumentData,
-    # Helpers
-    _safe_stem,
-    _sanitize_category_name,
-    # Functions
     build_classification_schema_for_category,
-    get_document_types_for_category,
     should_disable_cross_document_validation,
 )
 from dotenv import load_dotenv
@@ -70,7 +55,6 @@ from ddx.classification.validation_layer import (
     ValidatedFieldOutput,
     LocationInfo,
 )
-
 
 # =============================================================================
 # Category to Document Types Mapping (built from categories.py)
