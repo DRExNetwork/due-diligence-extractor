@@ -7,6 +7,7 @@ Supports two-level categorization: Top-level category → Document type
 
 from __future__ import annotations
 
+import html
 import re
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Tuple, Type
@@ -1045,6 +1046,17 @@ def _build_google_maps_link(raw_coordinates: Optional[str]) -> Optional[str]:
     return f"https://www.google.com/maps/search/?api=1&query={quote(raw_coordinates)}"
 
 
+def _decode_html_entities(value: Any) -> Any:
+    """Recursively decode HTML entities in string values within dicts and lists."""
+    if isinstance(value, str):
+        return html.unescape(value)
+    if isinstance(value, dict):
+        return {k: _decode_html_entities(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_decode_html_entities(item) for item in value]
+    return value
+
+
 def normalize_extracted_document(
     document_type: DocumentType | str,
     extracted: Dict[str, Any],
@@ -1054,6 +1066,11 @@ def normalize_extracted_document(
     doc_type_value = (
         document_type.value if isinstance(document_type, DocumentType) else document_type
     )
+
+    # Decode HTML entities (e.g. &Oacute; → Ó) that OCR may produce
+    extracted = _decode_html_entities(extracted)
+    if isinstance(extraction_metadata, dict):
+        extraction_metadata = _decode_html_entities(extraction_metadata)
 
     print(f"Normalizing extracted data for document type: {doc_type_value}")
     print(f"Initial extracted data keys: {extraction_metadata}")
