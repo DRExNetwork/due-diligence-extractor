@@ -647,6 +647,21 @@ class ProjectBasicEngineeringData(BaseModel):
     annual_load_energy_kwh: Optional[float] = Field(
         default=None, description="Annual load consumed energy in kWh"
     )
+    structure_type: Optional[str] = Field(
+        default=None,
+        description=(
+            "Type of mounting structure (anodized aluminum structure, coplanar, "
+            "land mounting, carports mounting on a metal roof, etc.)"
+        ),
+    )
+    structure_material: Optional[str] = Field(
+        default=None,
+        description="Material of the mounting structure (Anodized Aluminum, Hot deep Galvanized, etc.)",
+    )
+    structure_warranty_years: Optional[int] = Field(
+        default=None,
+        description="Structural warranty against corrosion in years",
+    )
 
 
 class KmzPoligonData(BaseModel):
