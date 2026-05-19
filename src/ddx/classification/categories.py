@@ -2014,6 +2014,14 @@ class NonOverlapProtectedAreasCertificateData(BaseModel):
         description="Geographic reference (coordinates or location reference)",
     )
     issuing_authority: Optional[str] = Field(default=None, description="Issuing authority")
+    issuance_date: Optional[str] = Field(
+        default=None,
+        description="Date of issuance (YYYY-MM-DD)",
+    )
+    validity_date: Optional[str] = Field(
+        default=None,
+        description="Validity date (YYYY-MM-DD)",
+    )
 
 
 class HRPolicyCodeOfConductData(BaseModel):
@@ -2176,41 +2184,9 @@ class LandUsePermitData(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    permit_number: Optional[str] = Field(
-        default=None,
-        description="Land use permit number or reference",
-    )
     issue_date: Optional[str] = Field(
         default=None,
         description="Date the permit was issued (YYYY-MM-DD)",
-    )
-    expiry_date: Optional[str] = Field(
-        default=None,
-        description="Permit expiry date (YYYY-MM-DD)",
-    )
-    issuing_authority: Optional[str] = Field(
-        default=None,
-        description="Authority that issued the permit",
-    )
-    land_use_classification: Optional[str] = Field(
-        default=None,
-        description="Zoning or land use classification",
-    )
-    project_name: Optional[str] = Field(
-        default=None,
-        description="Project name as stated in the permit",
-    )
-    parcel_id: Optional[str] = Field(
-        default=None,
-        description="Land parcel ID or cadastral reference",
-    )
-    area_m2: Optional[float] = Field(
-        default=None,
-        description="Permitted area in square meters",
-    )
-    permit_status: Optional[str] = Field(
-        default=None,
-        description="Current status of the permit (Active/Expired/Pending)",
     )
     municipality_issuing_body: Optional[str] = Field(
         default=None,
