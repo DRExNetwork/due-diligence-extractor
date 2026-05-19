@@ -1917,6 +1917,7 @@ class LandTitleDocumentEntry(BaseModel):
     document_type: Optional[str] = Field(default=None, description="Document type")
     document_number: Optional[str] = Field(default=None, description="Document number")
     document_date: Optional[str] = Field(default=None, description="Document date (YYYY-MM-DD)")
+    document_holder: Optional[str] = Field(default=None, description="Document holder name")
 
 
 class LeaseContractEntry(BaseModel):
