@@ -153,9 +153,9 @@ DOCUMENT_TYPE_TO_TOP_LEVEL: dict[DocumentType, TopLevelCategory] = {
 
 DOCUMENT_TYPE_DESCRIPTIONS: dict[DocumentType, str] = {
     # Company Information
-    DocumentType.CERTIFICATE_OF_LEGAL_EXISTENCE: "Official certificate containing company legal name, tax ID (RUC), commercial activity, and incorporation date",
+    DocumentType.CERTIFICATE_OF_LEGAL_EXISTENCE: "Government-issued tax registry certificate (RUC/SRI or equivalent) confirming the company's legal existence. Primary content is company registration data: legal name, tax ID (RUC), commercial activity code, incorporation date, tax regime, and address. The legal representative may appear as a registered field but designating or appointing that person is NOT the purpose of this document. Examples: SRI RUC certificate, Certificado de RUC, Chamber of Commerce certificate of existence.",
     DocumentType.SHAREHOLDERS_DECLARATION: "Declaration document listing shareholders/owners with their ownership percentages (>10% stake)",
-    DocumentType.LEGAL_REPRESENTATIVE_APPOINTMENT: "Official appointment document for the company's legal representative including validity period",
+    DocumentType.LEGAL_REPRESENTATIVE_APPOINTMENT: "Notarial act, corporate assembly resolution, or board certification that formally DESIGNATES or APPOINTS a specific person as legal representative, administrator, or authorized signatory of the entity. Key distinguishing features: explicit designating language (e.g. 'designar como', 'nombrar como', 'se designa', 'appoint as'), a defined appointment period or mandate duration, and signatures of company officers or an assembly. Examples: Nombramiento del Representante Legal, Certificación de nombramiento del Administrador, acta de asamblea designando representante.",
     DocumentType.ENERGY_CONSUMPTION_BILLS: "Energy consumption bills or energy reports from the electricity utility provider",
     # Company Financials
     DocumentType.FINANCIAL_STATEMENTS: "Audited or internal financial statements with balance sheet and income statement data including revenue, net income, EBIT, assets, liabilities, and equity (minimum 3 years)",
