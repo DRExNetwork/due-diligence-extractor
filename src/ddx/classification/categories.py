@@ -153,9 +153,36 @@ DOCUMENT_TYPE_TO_TOP_LEVEL: dict[DocumentType, TopLevelCategory] = {
 
 DOCUMENT_TYPE_DESCRIPTIONS: dict[DocumentType, str] = {
     # Company Information
-    DocumentType.CERTIFICATE_OF_LEGAL_EXISTENCE: "Government-issued tax registry certificate (RUC/SRI or equivalent) confirming the company's legal existence. Primary content is company registration data: legal name, tax ID (RUC), commercial activity code, incorporation date, tax regime, and address. The legal representative may appear as a registered field but designating or appointing that person is NOT the purpose of this document. Examples: SRI RUC certificate, Certificado de RUC, Chamber of Commerce certificate of existence.",
+    DocumentType.CERTIFICATE_OF_LEGAL_EXISTENCE: (
+        "Government-issued tax registry or commercial registry certificate whose PRIMARY SUBJECT is the COMPANY's registration record — not the appointment of any individual. "
+        "ISSUER is always a government authority: SRI (Servicio de Rentas Internas), Registro Mercantil, Superintendencia de Compañías, Cámara de Comercio, or equivalent. "
+        "The document header prominently shows the issuing government body and contains fields such as: RUC / tax ID number, commercial activity code (e.g. L68200301), tax regime (GENERAL/RIMPE), date of registration, date of incorporation, business address, and open/closed establishments. "
+        "A 'Representante legal' name may appear as ONE registered data field but the document is about the company record, NOT about designating that person. "
+        "CRITICAL — DO NOT classify as this type if: (1) the document's core action is to designate or appoint a person; (2) the issuer is the company's own assembly, president, secretary, or notary certifying a corporate resolution; "
+        "(3) the document is a 'Certificado Digital de Datos de Identidad' or 'Información Adicional del Ciudadano' from Registro Civil — those are PERSONAL IDENTITY documents, not company existence certificates; "
+    ),
     DocumentType.SHAREHOLDERS_DECLARATION: "Declaration document listing shareholders/owners with their ownership percentages (>10% stake)",
-    DocumentType.LEGAL_REPRESENTATIVE_APPOINTMENT: "Notarial act, corporate assembly resolution, or board certification that formally DESIGNATES or APPOINTS a specific person as legal representative, administrator, or authorized signatory of the entity. Key distinguishing features: explicit designating language (e.g. 'designar como', 'nombrar como', 'se designa', 'appoint as'), a defined appointment period or mandate duration, and signatures of company officers or an assembly. Examples: Nombramiento del Representante Legal, Certificación de nombramiento del Administrador, acta de asamblea designando representante.",
+    DocumentType.LEGAL_REPRESENTATIVE_APPOINTMENT: (
+        "Document whose PRIMARY LEGAL PURPOSE is to APPOINT, DESIGNATE, CERTIFY, or CONFIRM a specific person as legal representative, administrator, apoderado, gerente, or authorized signatory of an entity. "
+        "The CORE ACTION of the document is the designation of a person, not the registration status of the company. "
+        "STRONG INDICATORS — classify as this type when ANY of these are present: "
+        "phrases 'resolvieron designar', 'designar como ADMINISTRADOR', 'nombrar como Representante Legal', 'nombramiento', 'appoint as', 'se designa'; "
+        "assembly or shareholder resolution language; "
+        "Presidente + Secretario signatures on a corporate resolution; "
+        "mandate duration such as 'por el periodo de CINCO AÑOS'; "
+        "a named individual being granted authority over the entity. "
+        "MULTI-PAGE BUNDLE RULE — These documents are routinely submitted as multi-page PDF bundles. "
+        "The first 1–2 substantive pages contain the appointment resolution (Certificación, Nombramiento, Acta de Asamblea) "
+        "and/or a notarial 'Diligencia de Reconocimiento de Firmas'. "
+        "Later pages are supporting personal identity attachments of the appointed person: "
+        "Certificado Digital de Datos de Identidad, Información Adicional del Ciudadano, cédulas de identidad, Certificado de Votación, RUC information. "
+        "IF the first substantive pages contain appointment language or an assembly certification, "
+        "classify the ENTIRE PDF as LEGAL_REPRESENTATIVE_APPOINTMENT — "
+        "the presence of identity documents or RUC data on later pages does NOT change the classification. "
+        "DO NOT classify as CERTIFICATE_OF_LEGAL_EXISTENCE merely because: "
+        "a RUC number appears, the company name appears, the phrase 'Representante legal' appears, or identity documents are attached. "
+        "THIS DOCUMENT TYPE TAKES PRIORITY over Certificate of Legal Existence whenever appointment language is present on the lead pages."
+    ),
     DocumentType.ENERGY_CONSUMPTION_BILLS: "Energy consumption bills or energy reports from the electricity utility provider",
     # Company Financials
     DocumentType.FINANCIAL_STATEMENTS: "Audited or internal financial statements with balance sheet and income statement data including revenue, net income, EBIT, assets, liabilities, and equity (minimum 3 years)",
@@ -1379,12 +1406,23 @@ class OAMContractData(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    document_language: Optional[DocumentLanguageAnswer] = Field(
+        default=None,
+        description=(
+            "Primary language of the source document. "
+            "Return exactly one of: Spanish, English, Other."
+        ),
+    )
+
     # -------------------------------------------------------------------------
     # Maintenance Approach
     # -------------------------------------------------------------------------
     planned_maintenance_approach: Optional[str] = Field(
         default=None,
-        description="Description of the planned maintenance approach including frequency, scope, and methodology",
+        description=(
+            "Description of the planned maintenance approach including frequency, scope, and methodology. "
+            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
 
     # -------------------------------------------------------------------------
@@ -1462,6 +1500,14 @@ class ESHSESMSPoliciesData(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    document_language: Optional[DocumentLanguageAnswer] = Field(
+        default=None,
+        description=(
+            "Primary language of the source document. "
+            "Return exactly one of: Spanish, English, Other."
+        ),
+    )
 
     # -------------------------------------------------------------------------
     # ESMS Aligned with IFC Performance Standards
@@ -1565,15 +1611,16 @@ class ESHSESMSPoliciesData(BaseModel):
     )
     biodiversity_management_measures: Optional[str] = Field(
         default=None,
-        description="Biodiversity management measures",
+        description="Biodiversity management measures. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION,
     )
     community_impacts_management_measures: Optional[str] = Field(
         default=None,
-        description="Community impacts management measures",
+        description="Community impacts management measures. "
+        + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION,
     )
     climate_adaptation_measures: Optional[str] = Field(
         default=None,
-        description="Climate adaptation measures",
+        description="Climate adaptation measures. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION,
     )
 
 
@@ -1629,6 +1676,14 @@ class QAQCCommissioningData(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    document_language: Optional[DocumentLanguageAnswer] = Field(
+        default=None,
+        description=(
+            "Primary language of the source document. "
+            "Return exactly one of: Spanish, English, Other."
+        ),
+    )
 
     # -------------------------------------------------------------------------
     # Visual Inspection Summary
@@ -1687,6 +1742,14 @@ class IndustrialSafetyPlanData(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    document_language: Optional[DocumentLanguageAnswer] = Field(
+        default=None,
+        description=(
+            "Primary language of the source document. "
+            "Return exactly one of: Spanish, English, Other."
+        ),
+    )
+
     # -------------------------------------------------------------------------
     # Industrial Safety Plan Summary
     # -------------------------------------------------------------------------
@@ -1694,8 +1757,7 @@ class IndustrialSafetyPlanData(BaseModel):
         default=None,
         description=(
             "Summary of IFC-aligned HR practices described in the Industrial Safety Plan. "
-            "Return the summary in the exact same language as the source document. "
-            "Do not translate, normalize, or rewrite it into another language."
+            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
         ),
     )
 
@@ -1870,6 +1932,14 @@ class EmergencyResponseSecurityPlanData(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    document_language: Optional[DocumentLanguageAnswer] = Field(
+        default=None,
+        description=(
+            "Primary language of the source document. "
+            "Return exactly one of: Spanish, English, Other."
+        ),
+    )
+
     last_update_date: Optional[str] = Field(
         default=None,
         description="Last update date (YYYY-MM-DD)",
@@ -1884,7 +1954,7 @@ class EmergencyResponseSecurityPlanData(BaseModel):
     )
     climate_adaptation_actions: Optional[str] = Field(
         default=None,
-        description="Climate adaptation actions",
+        description="Climate adaptation actions. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION,
     )
     security_risks_covered: Optional[YesNoAnswer] = Field(
         default=None,
@@ -1892,15 +1962,16 @@ class EmergencyResponseSecurityPlanData(BaseModel):
     )
     security_arrangements: Optional[str] = Field(
         default=None,
-        description="Security arrangements",
+        description="Security arrangements. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION,
     )
     access_to_basic_resources_during_crisis: Optional[str] = Field(
         default=None,
-        description="Access to basic resources during crisis",
+        description="Access to basic resources during crisis. "
+        + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION,
     )
     emergency_response_protocols: Optional[str] = Field(
         default=None,
-        description="Emergency response protocols",
+        description="Emergency response protocols. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION,
     )
     coordination_with_authorities: Optional[YesNoAnswer] = Field(
         default=None,
@@ -1935,9 +2006,18 @@ class SiteLegalStatusSummaryData(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    document_language: Optional[DocumentLanguageAnswer] = Field(
+        default=None,
+        description=(
+            "Primary language of the source document. "
+            "Return exactly one of: Spanish, English, Other."
+        ),
+    )
+
     land_tenure_status: Optional[str] = Field(
         default=None,
-        description="Land tenure status (owned/leased/concession)",
+        description="Land tenure status (owned/leased/concession). "
+        + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION,
     )
     number_of_plots: Optional[int] = Field(default=None, description="Number of plots")
     land_title_documents_listed: Optional[List[LandTitleDocumentEntry]] = Field(
@@ -1956,7 +2036,7 @@ class SiteLegalStatusSummaryData(BaseModel):
     )
     collective_rights_description: Optional[str] = Field(
         default=None,
-        description="Collective rights description",
+        description="Collective rights description. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION,
     )
     known_property_disputes: Optional[YesNoAnswer] = Field(
         default=None,
@@ -1972,7 +2052,7 @@ class SiteLegalStatusSummaryData(BaseModel):
     )
     expropriation_risk_description: Optional[str] = Field(
         default=None,
-        description="Expropriation risk description",
+        description="Expropriation risk description. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION,
     )
 
 
@@ -2030,6 +2110,14 @@ class HRPolicyCodeOfConductData(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    document_language: Optional[DocumentLanguageAnswer] = Field(
+        default=None,
+        description=(
+            "Primary language of the source document. "
+            "Return exactly one of: Spanish, English, Other."
+        ),
+    )
+
     human_rights_policy_exists: Optional[YesNoAnswer] = Field(
         default=None,
         description=(
@@ -2072,7 +2160,8 @@ class HRPolicyCodeOfConductData(BaseModel):
     )
     supplier_labor_requirements: Optional[str] = Field(
         default=None,
-        description="Supplier labor requirements (extracted text)",
+        description="Supplier labor requirements (extracted text). "
+        + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION,
     )
 
 
