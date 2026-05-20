@@ -1593,9 +1593,15 @@ class ESHSESMSPoliciesData(BaseModel):
         default=None,
         description="Social aspects covered (communities, workers)",
     )
-    monitoring_indicators: Optional[List[ESMPMonitoringIndicatorEntry]] = Field(
+    monitoring_indicators: Optional[List[str]] = Field(
         default=None,
-        description="Monitoring indicators with unit and frequency",
+        description=(
+            "Monitoring indicators as a flat list of strings. "
+            "Each string must combine the indicator name, unit, and frequency in the format: "
+            "'<indicator> | <unit> | <frequency>'. "
+            "If unit is not available, use 'N/A' in its place. "
+            "Example: 'Nivel visible de polvo reducido | N/A | Diario'."
+        ),
     )
     biodiversity_management_measures: Optional[str] = Field(
         default=None,
