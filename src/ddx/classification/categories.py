@@ -1579,18 +1579,6 @@ class ESHSESMSPoliciesData(BaseModel):
     # -------------------------------------------------------------------------
     # Document Metadata
     # -------------------------------------------------------------------------
-    document_date: Optional[str] = Field(
-        default=None,
-        description="Date of the policy document (YYYY-MM-DD if available)",
-    )
-    document_version: Optional[str] = Field(
-        default=None,
-        description="Version number or revision of the policy document",
-    )
-    company_name: Optional[str] = Field(
-        default=None,
-        description="Company name as stated in the document",
-    )
     valid_from: Optional[str] = Field(default=None, description="Validity start date (YYYY-MM-DD)")
     valid_to: Optional[str] = Field(default=None, description="Validity end date (YYYY-MM-DD)")
     scope_of_application: Optional[str] = Field(
