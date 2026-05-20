@@ -2160,8 +2160,13 @@ class HRPolicyCodeOfConductData(BaseModel):
     )
     supplier_labor_requirements: Optional[str] = Field(
         default=None,
-        description="Supplier labor requirements (extracted text). "
-        + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION,
+        description=(
+            "Brief summary (2-4 sentences) of the labor and safety requirements that apply to "
+            "suppliers, contractors, and subcontractors — e.g. mandatory compliance with OHS/E&S "
+            "policies, contractual clauses, PPE obligations, and monitoring mechanisms. "
+            "Do NOT copy raw paragraphs from the document; write a concise summary. "
+            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
 
 
