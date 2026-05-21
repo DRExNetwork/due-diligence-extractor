@@ -366,7 +366,7 @@ class EnergyConsumptionBillsData(BaseModel):
     # -------------------------------------------------------------------------
     # Billing Period Identification
     # -------------------------------------------------------------------------
-    month: str = Field(description="Calendar month of the billing period (e.g., 'January' or '1')")
+    month: str = Field(description="Calendar month of the billing period as the full English month name (e.g., 'January', 'February'). Always return the month name, never a number.")
     year: Optional[int] = Field(
         default=None,
         description="Calendar year of the billing period (e.g., 2025)",
@@ -2014,13 +2014,27 @@ class SiteLegalStatusSummaryData(BaseModel):
         + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION,
     )
     number_of_plots: Optional[int] = Field(default=None, description="Number of plots")
-    land_title_documents_listed: Optional[List[LandTitleDocumentEntry]] = Field(
-        default=None,
-        description="Land title documents (type, number, date)",
+    land_title_documents_listed: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Land title documents as a flat list of strings. "
+            "Each string must combine the document type, number, date, and holder in the format: "
+            "'<document_type> | <document_number> | <document_date> | <document_holder>'. "
+            "If a value is not available, use 'N/A' in its place. "
+            "Example: 'Escritura Pública | 1234 | 2021-03-15 | Juan Pérez'. "
+            "Return an empty list [] if no land title documents are found."
+        ),
     )
-    lease_contracts_listed: Optional[List[LeaseContractEntry]] = Field(
-        default=None,
-        description="Lease contracts (lessor, term, expiry)",
+    lease_contracts_listed: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Lease contracts as a flat list of strings. "
+            "Each string must combine the lessor, term, and expiry in the format: "
+            "'<lessor> | <term> | <expiry>'. "
+            "If a value is not available, use 'N/A' in its place. "
+            "Example: 'Municipio de Quito | 30 years | 2045-12-31'. "
+            "Return an empty list [] if no lease contracts exist."
+        ),
     )
     collective_rights_indigenous_claims: Optional[YesNoAnswer] = Field(
         default=None,
