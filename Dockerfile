@@ -50,4 +50,4 @@ RUN mkdir -p /usr/src/app/store
 EXPOSE 8000
 
 # Run the FastAPI application with uvicorn
-CMD ["uvicorn", "ddx.api.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "ddx.api.main:app", "--host", "0.0.0.0", "--port", "8000","--workers", "2"]
