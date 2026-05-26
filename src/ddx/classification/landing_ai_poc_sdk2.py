@@ -16,6 +16,7 @@ from ddx.classification.categories import (
     TopLevelCategory,
     DocumentType,
     ClassificationResult,
+    SOURCE_LANGUAGE_RESPONSE_INSTRUCTION,
     # Company Information
     LegalInformation,
     ShareholderStructure,
@@ -641,7 +642,10 @@ class ProjectBasicEngineeringData(BaseModel):
     system_type: str = Field(description="Type of system (three-phase 3F, one-phase 1F)")
     voltage_mains_v: float = Field(description="Voltage mains in V (220, 440, etc.)")
     load_description: str = Field(
-        description="Description of the load (Industrial load, commercial load, motors, etc.)"
+        description=(
+            "Description of the load (Industrial load, commercial load, motors, etc.). "
+            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        )
     )
     load_capacity_kw: float = Field(description="Load capacity in kW")
     annual_load_energy_kwh: Optional[float] = Field(
