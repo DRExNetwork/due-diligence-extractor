@@ -72,7 +72,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from openai import OpenAI
 from pydantic import BaseModel, Field
 
-
 # =============================================================================
 # Utility Functions
 # =============================================================================
@@ -1175,7 +1174,7 @@ Examples:
     # Build field descriptions from schemas
     field_descriptions: Dict[str, str] = {}
     try:
-        from ddx.classification.landing_ai_poc_sdk import PYDANTIC_MODELS
+        from ddx.classification.landing_ai_poc_sdk2 import PYDANTIC_MODELS
 
         for model_cls in PYDANTIC_MODELS.values():
             if hasattr(model_cls, "model_fields"):

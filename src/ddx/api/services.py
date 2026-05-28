@@ -45,7 +45,7 @@ from ddx.classification.extraction_api import (
 )
 from ddx.classification.categories import TopLevelCategory
 from ddx.classification.landing_ai_poc_sdk import should_disable_cross_document_validation
-from ddx.classification.categories import DocumentType
+from ddx.classification.categories import DocumentType, DOCUMENT_TYPE_PARENT_REQUIREMENT
 from ddx.api.equipment_research import run_equipment_research_async
 
 from ddx.api.models import (
@@ -62,6 +62,9 @@ from ddx.api.models import (
     SummaryGenerationRequest,
     SummaryGenerationResponse,
     SummarySectionOutput,
+    TeaserNarrativeGenerationRequest,
+    TeaserNarrativeGenerationResponse,
+    TeaserRenderContent,
 )
 
 log = logging.getLogger("ddx.api.services")
@@ -134,14 +137,10 @@ def _normalize_document_type(document_type: str) -> str:
 
 _RESEARCH_FIELDS: List[str] = [
     "module_bloomberg",
-    "module_certifications",
     "module_certificate_evidence",
-    "module_factory_test_date",
     "module_test_evidence",
     "inverter_bloomberg",
-    "inverter_certifications",
     "inverter_certificate_evidence",
-    "inverter_anti_island_test_date",
     "inverter_test_evidence",
 ]
 
@@ -151,9 +150,35 @@ _UNCATEGORIZED_DOCUMENT_TYPE = "Uncategorized Document"
 def _is_equipment_sheets_document_type(document_type: Optional[str]) -> bool:
     if not document_type:
         return False
-    return _slug_document_type(document_type) == _slug_document_type(
+    if _slug_document_type(document_type) == _slug_document_type(
         DocumentType.PROJECT_DATA_EQUIPMENT_SHEETS.value
-    )
+    ):
+        return True
+    # Sub-types (cert/bloomberg evidence) map to equipment sheets for research purposes
+    try:
+        dt = DocumentType(document_type)
+        return (
+            DOCUMENT_TYPE_PARENT_REQUIREMENT.get(dt) == DocumentType.PROJECT_DATA_EQUIPMENT_SHEETS
+        )
+    except ValueError:
+        return False
+
+
+def _get_requirement_document_type(doc_type: str) -> str:
+    """Return the canonical requirement document type for NestJS DB lookup.
+
+    Sub-types (Module IEC Certificate, Inverter Bloomberg Evidence, etc.) have no
+    independent DB entry and must be resolved to their parent requirement type so
+    that NestJS can find the correct row in the requirements table.
+    """
+    try:
+        dt = DocumentType(doc_type)
+        parent = DOCUMENT_TYPE_PARENT_REQUIREMENT.get(dt)
+        if parent:
+            return parent.value
+    except ValueError:
+        pass
+    return doc_type
 
 
 def _clean_brand(value: Any) -> Optional[str]:
@@ -206,9 +231,10 @@ async def _resolve_research_payload_for_extracted_data(
     cache: Dict[Tuple[str, str], Dict[str, Any]],
 ) -> Optional[Dict[str, Any]]:
     module_brand, inverter_brand = _extract_equipment_brands(extracted_data)
-    if not (module_brand or inverter_brand):
-        return None
-
+    # Always resolve a payload — even when both brands are missing, so that
+    # repeated research fields receive placeholder rows (with known anchors
+    # such as standard_code / test_name pre-filled) giving NestJS a variableId
+    # for each certificate/test slot that users can later edit or re-trigger.
     cache_key = (module_brand or "", inverter_brand or "")
     print("this is cache key", cache_key)
     print("this is cache", cache)
@@ -518,7 +544,7 @@ def _generate_summary_with_openai(req: SummaryGenerationRequest) -> SummaryGener
     from openai import OpenAI
 
     model_name = req.model or os.getenv("SUMMARY_MODEL") or os.getenv("LLM_MODEL")
-    model_name = model_name or "gpt-4.1-2025-04-14"
+    model_name = model_name or "gpt-5-nano-2025-08-07"
 
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -635,6 +661,590 @@ async def generate_structured_summary(req: SummaryGenerationRequest) -> SummaryG
             e,
         )
         fallback_result = _build_fallback_summary(req, str(e))
+        _persist_summary_trace(
+            request_payload,
+            fallback_result.model_dump(),
+            status="fallback",
+            error=str(e),
+        )
+        return fallback_result
+
+
+# =============================================================================
+# Teaser Narrative Generation Service
+# =============================================================================
+
+
+_TEASER_RENDER_CONTENT_FIELDS: List[str] = [
+    "overview_intro",
+    "overview_closing",
+    "financial_intro",
+    "financial_body",
+    "financial_closing",
+    "technical_intro",
+    "technical_closing",
+    "regulatory_intro",
+    "regulatory_closing",
+    "esg_intro",
+    "conclusion",
+]
+
+_TEASER_RENDER_FIELD_GUIDANCE: Dict[str, Dict[str, Any]] = {
+    "overview_intro": {
+        "role": "Open the teaser and frame the project as an investment opportunity.",
+        "allowed_topics": [
+            "project identity",
+            "market context",
+            "offtaker sector",
+            "country",
+            "high-level investment thesis",
+            "teaser_data.project.description as context",
+        ],
+        "forbidden_topics": ["CAPEX detail", "DSCR detail", "PPA detail"],
+    },
+    "overview_closing": {
+        "role": "Bridge from the introduction into the key metrics table and broader diligence path.",
+        "allowed_topics": ["high-level technical and investment framing"],
+        "forbidden_topics": ["detailed financial metrics", "ESG card-state recap"],
+    },
+    "financial_intro": {
+        "role": "Introduce the financial viability of the project.",
+        "allowed_topics": [
+            "overall profitability framing",
+            "capital discipline",
+            "financing readiness",
+        ],
+        "forbidden_topics": ["equipment detail", "ESG detail"],
+    },
+    "financial_body": {
+        "role": "Interpret CAPEX, IRR, DSCR, invested capital, capital structure, and debt/equity posture.",
+        "allowed_topics": ["financial metrics from teaser_data.metrics only"],
+        "forbidden_topics": ["technical warranties", "regulatory dates", "ESG states"],
+    },
+    "financial_closing": {
+        "role": "Close the financial section and transition into technical robustness.",
+        "allowed_topics": ["connection between financial outcomes and technical design quality"],
+        "forbidden_topics": ["new numeric invention"],
+    },
+    "technical_intro": {
+        "role": "Explain equipment quality, technical risk mitigation, and performance assumptions.",
+        "allowed_topics": ["brands", "models", "warranties", "degradation", "shading losses"],
+        "forbidden_topics": ["CAPEX or debt interpretation"],
+    },
+    "technical_closing": {
+        "role": "Bridge from technical quality to execution and regulatory readiness.",
+        "allowed_topics": ["technical de-risking", "implementation readiness"],
+        "forbidden_topics": ["ESG card-state recap"],
+    },
+    "regulatory_intro": {
+        "role": "Frame permitting maturity and interconnection readiness before the deterministic feasibility callout.",
+        "allowed_topics": ["regulatory maturity", "readiness", "permit posture"],
+        "forbidden_topics": ["duplicating the deterministic feasibility summary verbatim"],
+    },
+    "regulatory_closing": {
+        "role": "Short bridge from regulatory readiness into ESG discipline.",
+        "allowed_topics": ["execution readiness", "governance transition"],
+        "forbidden_topics": ["KPI enumeration"],
+    },
+    "esg_intro": {
+        "role": "Explain why ESG quality matters for this project and sector.",
+        "allowed_topics": [
+            "ESG importance",
+            "IFC-style framing",
+            "export or supply-chain relevance when supported by context",
+        ],
+        "forbidden_topics": ["individual card-state recap as a checklist"],
+    },
+    "conclusion": {
+        "role": "Final investor summary of the full project.",
+        "allowed_topics": [
+            "integrated investment thesis across technical, financial, regulatory, and ESG strengths"
+        ],
+        "forbidden_topics": ["raw repetition of every prior metric"],
+    },
+}
+
+
+def _count_words(value: str) -> int:
+    return len(re.findall(r"\b\w+\b", value or ""))
+
+
+def _build_teaser_narrative_system_prompt() -> str:
+    return (
+        "You generate render-ready narrative fragments for an Executive Investment Summary teaser. "
+        "Use only the supplied structured teaser data and style reference. "
+        "Write entirely in the requested language. "
+        "Return valid JSON matching schema_version teaser_render_content_v2 exactly. "
+        "When teaser_data.project.description is present, treat it as core project context. "
+        "Use it to understand what the project does, who the beneficiary or offtaker is, and what commercial or operational problem the project is solving. "
+        "Use that context to make the overview and conclusion more specific. "
+        "Do not copy the description verbatim. "
+        "You are not writing six broad sections. "
+        "You are writing the exact text blocks that NestJS will inject into the HTML template. "
+        "Each field has a different job and must be written independently. "
+        "Do not merge fields. "
+        "Do not mention tables, cards, bullets, or HTML explicitly unless the field guidance asks for a transition toward them. "
+        "Do not invent numbers, dates, document states, ESG statuses, sector labels, names, or locations. "
+        "Do not output markdown, HTML, tables, or extra keys. "
+        "Use the style reference for tone, investor framing, and paragraph role. "
+        "Do not copy the style reference text verbatim."
+    )
+
+
+def _build_teaser_narrative_user_payload(
+    req: TeaserNarrativeGenerationRequest,
+) -> Dict[str, Any]:
+    return {
+        "schema_version": req.schema_version,
+        "project_id": req.project_id,
+        "project_name": req.project_name,
+        "language": req.language,
+        "tone": req.tone,
+        "style_reference_markdown": req.style_reference_markdown,
+        "field_budgets": req.field_budgets.model_dump(),
+        "teaser_data": req.teaser_data,
+        "field_guidance": _TEASER_RENDER_FIELD_GUIDANCE,
+        "hard_rules": {
+            "no_html": True,
+            "no_markdown": True,
+            "no_tables": True,
+            "no_numeric_invention": True,
+            "use_only_supplied_facts": True,
+            "use_project_description_when_present": True,
+            "return_render_ready_content_fields": True,
+        },
+    }
+
+
+def _find_overview_boundary_violations(
+    req: TeaserNarrativeGenerationRequest,
+    overview: str,
+) -> List[str]:
+    violations: List[str] = []
+    normalized = overview or ""
+
+    keyword_checks = [
+        (r"\bcapex\b", "financial KPI mention (CAPEX)"),
+        (r"\bdscr\b", "financial KPI mention (DSCR)"),
+        (r"\birr\b", "financial KPI mention (IRR)"),
+        (r"\bppa\b", "financial KPI mention (PPA)"),
+        (r"\busd\b", "currency-specific financial detail"),
+        (r"\biva\b", "VAT-specific financial detail"),
+        # NOTE: 'offtaker' is an explicitly allowed topic in overview_intro (offtaker sector),
+        # so we do not block it here. 'equity' and 'debt' remain blocked as capital-structure
+        # detail that must stay in the financial section.
+        (r"\bequity\b", "capital-structure detail"),
+        (r"\bdebt\b", "capital-structure detail"),
+    ]
+
+    for pattern, reason in keyword_checks:
+        if re.search(pattern, normalized, flags=re.IGNORECASE):
+            violations.append(reason)
+
+    regulatory_framework = ((req.teaser_data or {}).get("regulatory") or {}).get(
+        "regulatoryFramework"
+    )
+    if isinstance(regulatory_framework, str) and regulatory_framework.strip():
+        if regulatory_framework.strip().lower() in normalized.lower():
+            violations.append("raw regulatory framework code in overview")
+
+    if re.search(r"\b\d{1,2}/\d{1,2}/\d{4}\b", normalized):
+        violations.append("dated regulatory detail in overview")
+
+    if re.search(
+        r"\bavailable hosting capacity\b|\bhosting disponible\b", normalized, flags=re.IGNORECASE
+    ):
+        violations.append("section 4 hosting-capacity detail in overview")
+
+    if re.search(
+        r"\bmissing\b|\bdeliver_later\b|\bno disponible\b", normalized, flags=re.IGNORECASE
+    ):
+        violations.append("section 5 delivery-state recap in overview")
+
+    return sorted(set(violations))
+
+
+def _validate_teaser_narrative_section_boundaries(
+    req: TeaserNarrativeGenerationRequest,
+    parsed: Dict[str, Any],
+) -> None:
+    content = parsed.get("content") or {}
+    # Only validate overview_intro for boundary violations. overview_closing is an intentional
+    # bridge into the key metrics table and may gesture at financial framing without including
+    # raw figures. Checking both fields combined caused excessive false-positives that triggered
+    # the lenient-fallback cascade on every generation attempt.
+    overview_violations = _find_overview_boundary_violations(
+        req,
+        str(content.get("overview_intro") or ""),
+    )
+    if overview_violations:
+        raise RuntimeError(
+            "Teaser narrative overview violated section boundary: " + "; ".join(overview_violations)
+        )
+
+
+def _build_teaser_narrative_response_schema() -> Dict[str, Any]:
+    content_properties = {
+        field_name: {"type": "string"} for field_name in _TEASER_RENDER_CONTENT_FIELDS
+    }
+
+    return {
+        "name": "project_teaser_render_content_response",
+        "schema": {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "content": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": content_properties,
+                    "required": _TEASER_RENDER_CONTENT_FIELDS,
+                }
+            },
+            "required": ["content"],
+        },
+        "strict": True,
+    }
+
+
+def _extract_teaser_fallback_context(
+    req: TeaserNarrativeGenerationRequest,
+) -> Dict[str, Any]:
+    teaser_data = req.teaser_data or {}
+    project = teaser_data.get("project") or {}
+    narrative_context = teaser_data.get("narrativeContext") or {}
+
+    return {
+        "teaser_data": teaser_data,
+        "project_name": project.get("name") or req.project_name,
+        "description": project.get("description"),
+        "country": narrative_context.get("country") or "el mercado objetivo",
+        "industry": narrative_context.get("industry") or "el sector operativo del offtaker",
+        "sector": narrative_context.get("offtakerSector")
+        or narrative_context.get("industry")
+        or "el sector operativo del offtaker",
+        "investment_angle": narrative_context.get("investmentAngle")
+        or "las métricas del proyecto y la evidencia documental disponible",
+    }
+
+
+def _build_teaser_narrative_lenient_system_prompt() -> str:
+    return (
+        "You generate render-ready narrative fragments for an executive investment teaser. "
+        "Use only the supplied structured teaser data. "
+        "Write every content field entirely in the language specified by request.language; when unspecified, default to Spanish ('es'). "
+        "When teaser_data.project.description is present, use it as core project context without copying it verbatim. "
+        "Do not invent numbers, dates, document states, ESG statuses, names, or locations. "
+        "Do not return HTML, markdown, bullet lists, tables, or extra keys. "
+        "Word budgets and section-boundary rules are relaxed for this call; focus on producing readable, investor-facing prose. "
+        "Return valid JSON matching the requested schema exactly."
+    )
+
+
+def _generate_teaser_narrative_lenient(
+    req: TeaserNarrativeGenerationRequest,
+    original_failure_reason: str,
+) -> TeaserNarrativeGenerationResponse:
+    """
+    Lenient LLM call used when the strict call fails validation.
+    No word-budget or section-boundary enforcement — just produce clean prose.
+    Only called when the LLM itself is reachable; network/auth errors skip this.
+    """
+    from openai import OpenAI
+
+    model_name = req.model or os.getenv("SUMMARY_MODEL") or os.getenv("LLM_MODEL")
+    model_name = model_name or "gpt-5-nano-2025-08-07"
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is not configured")
+
+    client = OpenAI(api_key=api_key)
+
+    user_prompt = (
+        "Generate teaser render content JSON using this payload. "
+        "The previous strict attempt was rejected for: "
+        f"{original_failure_reason}\n\n"
+        "Produce clean investor-facing prose. "
+        "Ignore word budgets and section boundary enforcement for this call.\n\n"
+        f"{json.dumps(_build_teaser_narrative_user_payload(req), ensure_ascii=False)}"
+    )
+
+    completion = client.chat.completions.create(
+        model=model_name,
+        messages=[
+            {"role": "system", "content": _build_teaser_narrative_lenient_system_prompt()},
+            {"role": "user", "content": user_prompt},
+        ],
+        response_format={
+            "type": "json_schema",
+            "json_schema": _build_teaser_narrative_response_schema(),
+        },
+    )
+
+    content = completion.choices[0].message.content if completion.choices else None
+    if not content:
+        raise RuntimeError("LLM returned empty response in lenient fallback call")
+
+    parsed = json.loads(content)
+    render_content = TeaserRenderContent.model_validate(parsed.get("content", {}))
+
+    return TeaserNarrativeGenerationResponse(
+        generated_at=_utc_now_iso(),
+        project_id=req.project_id,
+        project_name=req.project_name,
+        language=req.language,
+        model_version=getattr(completion, "model", model_name),
+        content=render_content,
+        quality_checks={
+            "within_budget": False,
+            "lenient_fallback": True,
+            "original_failure_reason": original_failure_reason,
+        },
+        generation_mode="fallback",
+    )
+
+
+def _build_fallback_teaser_narrative(
+    req: TeaserNarrativeGenerationRequest, reason: str
+) -> TeaserNarrativeGenerationResponse:
+    """
+    Last-resort fallback used only when the LLM itself is unreachable
+    (no API key, network error, auth failure).
+    Returns minimal neutral placeholders — never embeds system names or raw errors.
+    """
+    context = _extract_teaser_fallback_context(req)
+    project_name = context["project_name"]
+    has_description = bool(_safe_str(context.get("description")).strip())
+
+    overview_intro = (
+        f"{project_name} representa una oportunidad de inversión en infraestructura solar fotovoltaica. "
+        "Los parámetros técnicos y financieros del proyecto se encuentran disponibles en las secciones estructuradas del teaser."
+    )
+    if has_description:
+        overview_intro += " La descripción del proyecto aporta contexto operativo adicional para orientar la evaluación."
+
+    return TeaserNarrativeGenerationResponse(
+        generated_at=_utc_now_iso(),
+        project_id=req.project_id,
+        project_name=req.project_name,
+        language=req.language,
+        model_version="unavailable",
+        content=TeaserRenderContent(
+            overview_intro=overview_intro,
+            overview_closing=(
+                "La lectura inicial del proyecto debe complementarse con las métricas, tablas y evidencia documental del teaser."
+            ),
+            financial_intro=(
+                "Los aspectos financieros clave del proyecto se detallan en las métricas estructuradas del teaser."
+            ),
+            financial_body=(
+                "La información de CAPEX, retorno, cobertura y estructura comercial debe revisarse directamente en los indicadores financieros disponibles."
+            ),
+            financial_closing=(
+                "La evaluación financiera debe leerse junto con la configuración técnica y el estado documental del proyecto."
+            ),
+            technical_intro=(
+                "Las especificaciones técnicas y de equipamiento se encuentran disponibles en la tabla de datos del teaser."
+            ),
+            technical_closing=(
+                "La información técnica disponible sirve como base para revisar desempeño, garantías y riesgos de ejecución."
+            ),
+            regulatory_intro=(
+                "El estado regulatorio del proyecto se presenta en el resumen de factibilidad eléctrica estructurado."
+            ),
+            regulatory_closing=(
+                "La evidencia regulatoria debe revisarse junto con los documentos de soporte disponibles."
+            ),
+            esg_intro=(
+                f"La evidencia ESG de {project_name} se resume en las tarjetas de estado del teaser."
+            ),
+            conclusion=(
+                f"{project_name} debe evaluarse a través de las métricas estructuradas del teaser y la evidencia documental disponible."
+            ),
+        ),
+        quality_checks={
+            "within_budget": False,
+            "service_unavailable": True,
+        },
+        generation_mode="fallback",
+    )
+
+
+def _validate_teaser_narrative_budgets(
+    req: TeaserNarrativeGenerationRequest,
+    parsed: Dict[str, Any],
+) -> Dict[str, int]:
+    field_word_counts: Dict[str, int] = {}
+    content = parsed.get("content")
+
+    if not isinstance(content, dict):
+        raise RuntimeError("Teaser narrative response did not include a content object")
+
+    for field_name in _TEASER_RENDER_CONTENT_FIELDS:
+        text = content.get(field_name, "")
+        word_count = _count_words(text)
+        field_word_counts[field_name] = word_count
+
+        budget = getattr(req.field_budgets, field_name)
+        if word_count < budget.min_words or word_count > budget.max_words:
+            raise RuntimeError(
+                f"Teaser render content field '{field_name}' violated word budget: {word_count} words, expected {budget.min_words}-{budget.max_words}"
+            )
+
+    return field_word_counts
+
+
+def _generate_teaser_narrative_with_openai(
+    req: TeaserNarrativeGenerationRequest,
+) -> TeaserNarrativeGenerationResponse:
+    from openai import OpenAI
+
+    model_name = req.model or os.getenv("SUMMARY_MODEL") or os.getenv("LLM_MODEL")
+    model_name = model_name or "gpt-5-nano-2025-08-07"
+
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is not configured")
+
+    client = OpenAI(api_key=api_key)
+
+    def request_completion(repair_note: Optional[str] = None):
+        user_prompt = (
+            "Generate teaser render content JSON using this payload:\n"
+            f"{json.dumps(_build_teaser_narrative_user_payload(req), ensure_ascii=False)}"
+        )
+        if repair_note:
+            user_prompt += (
+                "\n\nThe previous draft was rejected. Regenerate the full response and obey the section guidance exactly. "
+                f"Rejected because: {repair_note}"
+            )
+
+        return client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {"role": "system", "content": _build_teaser_narrative_system_prompt()},
+                {"role": "user", "content": user_prompt},
+            ],
+            response_format={
+                "type": "json_schema",
+                "json_schema": _build_teaser_narrative_response_schema(),
+            },
+        )
+
+    def parse_and_validate(completion) -> Tuple[Dict[str, Any], Dict[str, int]]:
+        content = completion.choices[0].message.content if completion.choices else None
+        if not content:
+            raise RuntimeError("LLM returned empty response for teaser narrative generation")
+
+        parsed = json.loads(content)
+        field_word_counts = _validate_teaser_narrative_budgets(req, parsed)
+        _validate_teaser_narrative_section_boundaries(req, parsed)
+        return parsed, field_word_counts
+
+    completion = request_completion()
+
+    try:
+        parsed, field_word_counts = parse_and_validate(completion)
+    except RuntimeError as first_error:
+        # One strict repair attempt first; if it still fails validation, raise
+        # so the caller can escalate to the lenient path.
+        completion = request_completion(str(first_error))
+        parsed, field_word_counts = parse_and_validate(completion)
+
+    render_content = TeaserRenderContent.model_validate(parsed.get("content", {}))
+
+    return TeaserNarrativeGenerationResponse(
+        generated_at=_utc_now_iso(),
+        project_id=req.project_id,
+        project_name=req.project_name,
+        language=req.language,
+        model_version=getattr(completion, "model", model_name),
+        content=render_content,
+        quality_checks={
+            "within_budget": True,
+            "field_word_counts": field_word_counts,
+        },
+        generation_mode="llm",
+    )
+
+
+# Errors that indicate the LLM service itself is unreachable or misconfigured.
+# For these we skip the lenient LLM retry and go straight to the neutral placeholder.
+_LLM_UNREACHABLE_MARKERS = (
+    "OPENAI_API_KEY is not configured",
+    "Connection error",
+    "AuthenticationError",
+    "RateLimitError",
+    "APIConnectionError",
+)
+
+
+def _is_llm_unreachable_error(exc: Exception) -> bool:
+    msg = str(exc)
+    return any(marker in msg for marker in _LLM_UNREACHABLE_MARKERS)
+
+
+async def generate_teaser_narrative(
+    req: TeaserNarrativeGenerationRequest,
+) -> TeaserNarrativeGenerationResponse:
+    """Generate teaser narrative fields from structured teaser data."""
+
+    request_payload = _build_teaser_narrative_user_payload(req)
+
+    log.info(
+        "Teaser narrative request: project=%s, language=%s",
+        req.project_id,
+        req.language,
+    )
+    log.debug("Teaser narrative payload: %s", _truncate_for_log(request_payload))
+
+    try:
+        result = await asyncio.to_thread(_generate_teaser_narrative_with_openai, req)
+        _persist_summary_trace(
+            request_payload,
+            result.model_dump(),
+            status="success",
+        )
+        log.info(
+            "Teaser narrative done: project=%s, mode=%s",
+            req.project_id,
+            result.generation_mode,
+        )
+        return result
+    except Exception as e:
+        log.warning(
+            "Teaser narrative strict call failed for project=%s: %s",
+            req.project_id,
+            e,
+        )
+
+        # If the LLM is reachable, try a lenient call (no budget/boundary rules).
+        if not _is_llm_unreachable_error(e):
+            try:
+                lenient_result = await asyncio.to_thread(
+                    _generate_teaser_narrative_lenient, req, str(e)
+                )
+                _persist_summary_trace(
+                    request_payload,
+                    lenient_result.model_dump(),
+                    status="lenient_fallback",
+                    error=str(e),
+                )
+                log.info(
+                    "Teaser narrative lenient fallback done: project=%s",
+                    req.project_id,
+                )
+                return lenient_result
+            except Exception as lenient_e:
+                log.warning(
+                    "Teaser narrative lenient call also failed for project=%s: %s",
+                    req.project_id,
+                    lenient_e,
+                )
+
+        # LLM is unreachable or both calls failed — use minimal neutral placeholders.
+        fallback_result = _build_fallback_teaser_narrative(req, str(e))
         _persist_summary_trace(
             request_payload,
             fallback_result.model_dump(),
@@ -1017,6 +1627,9 @@ async def targeted_completion(req: TargetedCompletionRequest) -> TargetedComplet
     for the given document type.
     """
     doc_type, top_level_str = _resolve_document_type(req.document_type)
+    # Sub-types (e.g. "Module IEC Certificate") have no independent DB entry in NestJS.
+    # Resolve to the parent requirement type so callers can look up the correct DB row.
+    response_doc_type = _get_requirement_document_type(doc_type)
 
     temp_dir = None
     try:
@@ -1024,7 +1637,7 @@ async def targeted_completion(req: TargetedCompletionRequest) -> TargetedComplet
         resolved = ResolvedFiles(req.s3_paths, path_mapping)
 
         if resolved.is_empty:
-            return _build_empty_targeted_response(req, top_level_str, doc_type)
+            return _build_empty_targeted_response(req, top_level_str, response_doc_type)
 
         enable_validation = True
         if should_disable_cross_document_validation(doc_type):
@@ -1056,7 +1669,7 @@ async def targeted_completion(req: TargetedCompletionRequest) -> TargetedComplet
         return _assemble_targeted_response(
             req,
             top_level_str,
-            doc_type,
+            response_doc_type,
             results_list,
             validated_result,
             resolved,

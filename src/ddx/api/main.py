@@ -39,6 +39,8 @@ from ddx.api.models import (
     # Summary
     SummaryGenerationRequest,
     SummaryGenerationResponse,
+    TeaserNarrativeGenerationRequest,
+    TeaserNarrativeGenerationResponse,
     # Discovery
     HealthResponse,
     CategoryInfo,
@@ -49,6 +51,7 @@ from ddx.api.services import (
     targeted_completion,
     validation_correction,
     generate_structured_summary,
+    generate_teaser_narrative,
 )
 from ddx.classification.extraction_api import (
     get_supported_categories,
@@ -475,6 +478,53 @@ async def endpoint_validation_correction(req: ValidationCorrectionRequest):
 # =============================================================================
 # Summary Generation Endpoint
 # =============================================================================
+
+
+@app.post(
+    "/api/v1/teaser/narrative/generate",
+    response_model=TeaserNarrativeGenerationResponse,
+    tags=["Teaser"],
+    summary="Generate render-ready teaser content from NestJS teaser payload",
+    description=(
+        "Receives structured teaser data from NestJS and returns render-ready "
+        "content fields that map directly to the teaser HTML renderer."
+    ),
+)
+async def endpoint_generate_teaser_narrative(req: TeaserNarrativeGenerationRequest):
+    """
+    Teaser narrative generation for the Executive Investment Summary flow.
+
+    **When to use:** NestJS has already assembled deterministic teaser data and
+    needs bounded prose for the exact teaser render fields.
+
+    **AI Responsibility:**
+    - Generate only the content.* fields requested by schema_version teaser_render_content_v2
+    - Use only supplied facts
+    - Use project.description as context when present without copying it verbatim
+    - Respect per-field word budgets
+    """
+    try:
+        log.info(
+            "Teaser narrative generate: project=%s, language=%s",
+            req.project_id,
+            req.language,
+        )
+        log.info("data coming from nest.js: %s", req)
+        result = await generate_teaser_narrative(req)
+        log.info(
+            "Teaser narrative generated: project=%s, mode=%s",
+            req.project_id,
+            result.generation_mode,
+        )
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except RuntimeError as e:
+        log.exception("Teaser narrative generation failed")
+        raise HTTPException(status_code=500, detail=str(e))
+    except Exception as e:
+        log.exception("Unexpected error in teaser narrative generation")
+        raise HTTPException(status_code=500, detail=f"Internal error: {type(e).__name__}: {str(e)}")
 
 
 @app.post(

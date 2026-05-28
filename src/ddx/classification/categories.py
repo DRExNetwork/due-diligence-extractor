@@ -4,15 +4,16 @@
 Document categories and extraction schemas for due diligence documents.
 Supports two-level categorization: Top-level category → Document type
 """
+
 from __future__ import annotations
 
+import html
 import re
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Tuple, Type
 from urllib.parse import quote
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
-
 
 # =============================================================================
 # Top-Level Categories (Level 1)
@@ -73,6 +74,10 @@ class DocumentType(str, Enum):
     # Technical Documents
     PROJECT_SIMULATION_REPORT = "Project Simulation Report"
     PROJECT_DATA_EQUIPMENT_SHEETS = "Project Data Main Equipment Sheets"
+    MODULE_IEC_CERTIFICATE = "Module IEC Certificate"
+    INVERTER_IEC_CERTIFICATE = "Inverter IEC Certificate"
+    MODULE_BLOOMBERG_EVIDENCE = "Module Bloomberg Evidence"
+    INVERTER_BLOOMBERG_EVIDENCE = "Inverter Bloomberg Evidence"
     PROJECT_BASIC_ENGINEERING = "Project Basic Engineering"
     PROJECT_VISIT_REPORT = "Project Visit Report"
     PROJECT_LAYOUT = "Project Layout"
@@ -121,6 +126,10 @@ DOCUMENT_TYPE_TO_TOP_LEVEL: dict[DocumentType, TopLevelCategory] = {
     # Technical
     DocumentType.PROJECT_SIMULATION_REPORT: TopLevelCategory.TECHNICAL,
     DocumentType.PROJECT_DATA_EQUIPMENT_SHEETS: TopLevelCategory.TECHNICAL,
+    DocumentType.MODULE_IEC_CERTIFICATE: TopLevelCategory.TECHNICAL,
+    DocumentType.INVERTER_IEC_CERTIFICATE: TopLevelCategory.TECHNICAL,
+    DocumentType.MODULE_BLOOMBERG_EVIDENCE: TopLevelCategory.TECHNICAL,
+    DocumentType.INVERTER_BLOOMBERG_EVIDENCE: TopLevelCategory.TECHNICAL,
     DocumentType.PROJECT_BASIC_ENGINEERING: TopLevelCategory.TECHNICAL,
     DocumentType.PROJECT_VISIT_REPORT: TopLevelCategory.TECHNICAL,
     DocumentType.PROJECT_LAYOUT: TopLevelCategory.TECHNICAL,
@@ -144,9 +153,36 @@ DOCUMENT_TYPE_TO_TOP_LEVEL: dict[DocumentType, TopLevelCategory] = {
 
 DOCUMENT_TYPE_DESCRIPTIONS: dict[DocumentType, str] = {
     # Company Information
-    DocumentType.CERTIFICATE_OF_LEGAL_EXISTENCE: "Official certificate containing company legal name, tax ID (RUC), commercial activity, and incorporation date",
+    DocumentType.CERTIFICATE_OF_LEGAL_EXISTENCE: (
+        "Government-issued tax registry or commercial registry certificate whose PRIMARY SUBJECT is the COMPANY's registration record — not the appointment of any individual. "
+        "ISSUER is always a government authority: SRI (Servicio de Rentas Internas), Registro Mercantil, Superintendencia de Compañías, Cámara de Comercio, or equivalent. "
+        "The document header prominently shows the issuing government body and contains fields such as: RUC / tax ID number, commercial activity code (e.g. L68200301), tax regime (GENERAL/RIMPE), date of registration, date of incorporation, business address, and open/closed establishments. "
+        "A 'Representante legal' name may appear as ONE registered data field but the document is about the company record, NOT about designating that person. "
+        "CRITICAL — DO NOT classify as this type if: (1) the document's core action is to designate or appoint a person; (2) the issuer is the company's own assembly, president, secretary, or notary certifying a corporate resolution; "
+        "(3) the document is a 'Certificado Digital de Datos de Identidad' or 'Información Adicional del Ciudadano' from Registro Civil — those are PERSONAL IDENTITY documents, not company existence certificates; "
+    ),
     DocumentType.SHAREHOLDERS_DECLARATION: "Declaration document listing shareholders/owners with their ownership percentages (>10% stake)",
-    DocumentType.LEGAL_REPRESENTATIVE_APPOINTMENT: "Official appointment document for the company's legal representative including validity period",
+    DocumentType.LEGAL_REPRESENTATIVE_APPOINTMENT: (
+        "Document whose PRIMARY LEGAL PURPOSE is to APPOINT, DESIGNATE, CERTIFY, or CONFIRM a specific person as legal representative, administrator, apoderado, gerente, or authorized signatory of an entity. "
+        "The CORE ACTION of the document is the designation of a person, not the registration status of the company. "
+        "STRONG INDICATORS — classify as this type when ANY of these are present: "
+        "phrases 'resolvieron designar', 'designar como ADMINISTRADOR', 'nombrar como Representante Legal', 'nombramiento', 'appoint as', 'se designa'; "
+        "assembly or shareholder resolution language; "
+        "Presidente + Secretario signatures on a corporate resolution; "
+        "mandate duration such as 'por el periodo de CINCO AÑOS'; "
+        "a named individual being granted authority over the entity. "
+        "MULTI-PAGE BUNDLE RULE — These documents are routinely submitted as multi-page PDF bundles. "
+        "The first 1–2 substantive pages contain the appointment resolution (Certificación, Nombramiento, Acta de Asamblea) "
+        "and/or a notarial 'Diligencia de Reconocimiento de Firmas'. "
+        "Later pages are supporting personal identity attachments of the appointed person: "
+        "Certificado Digital de Datos de Identidad, Información Adicional del Ciudadano, cédulas de identidad, Certificado de Votación, RUC information. "
+        "IF the first substantive pages contain appointment language or an assembly certification, "
+        "classify the ENTIRE PDF as LEGAL_REPRESENTATIVE_APPOINTMENT — "
+        "the presence of identity documents or RUC data on later pages does NOT change the classification. "
+        "DO NOT classify as CERTIFICATE_OF_LEGAL_EXISTENCE merely because: "
+        "a RUC number appears, the company name appears, the phrase 'Representante legal' appears, or identity documents are attached. "
+        "THIS DOCUMENT TYPE TAKES PRIORITY over Certificate of Legal Existence whenever appointment language is present on the lead pages."
+    ),
     DocumentType.ENERGY_CONSUMPTION_BILLS: "Energy consumption bills or energy reports from the electricity utility provider",
     # Company Financials
     DocumentType.FINANCIAL_STATEMENTS: "Audited or internal financial statements with balance sheet and income statement data including revenue, net income, EBIT, assets, liabilities, and equity (minimum 3 years)",
@@ -159,6 +195,10 @@ DOCUMENT_TYPE_DESCRIPTIONS: dict[DocumentType, str] = {
     # Technical
     DocumentType.PROJECT_SIMULATION_REPORT: "Technical simulation results and performance analysis for the solar project (PVsyst/Helioscope)",
     DocumentType.PROJECT_DATA_EQUIPMENT_SHEETS: "Equipment specifications including solar modules, inverters, and mounting structures",
+    DocumentType.MODULE_IEC_CERTIFICATE: "Third-party IEC certificate for a solar module. Extract the IEC standard code and certificate validity/expiry date.",
+    DocumentType.INVERTER_IEC_CERTIFICATE: "Third-party IEC certificate for an inverter. Extract the IEC standard code and certificate validity/expiry date.",
+    DocumentType.MODULE_BLOOMBERG_EVIDENCE: "BloombergNEF or Bloomberg evidence document for a solar module brand. Extract only the rating or qualification shown.",
+    DocumentType.INVERTER_BLOOMBERG_EVIDENCE: "BloombergNEF or Bloomberg evidence document for an inverter brand. Extract only the rating or qualification shown.",
     DocumentType.PROJECT_BASIC_ENGINEERING: "Fundamental engineering design and technical specifications",
     DocumentType.PROJECT_VISIT_REPORT: "Field visit observations and assessment findings",
     DocumentType.PROJECT_LAYOUT: "Spatial arrangement and layout diagrams of the project",
@@ -326,7 +366,7 @@ class EnergyConsumptionBillsData(BaseModel):
     # -------------------------------------------------------------------------
     # Billing Period Identification
     # -------------------------------------------------------------------------
-    month: str = Field(description="Calendar month of the billing period (e.g., 'January' or '1')")
+    month: str = Field(description="Calendar month of the billing period as the full English month name (e.g., 'January', 'February'). Always return the month name, never a number.")
     year: Optional[int] = Field(
         default=None,
         description="Calendar year of the billing period (e.g., 2025)",
@@ -1033,6 +1073,17 @@ def _build_google_maps_link(raw_coordinates: Optional[str]) -> Optional[str]:
     return f"https://www.google.com/maps/search/?api=1&query={quote(raw_coordinates)}"
 
 
+def _decode_html_entities(value: Any) -> Any:
+    """Recursively decode HTML entities in string values within dicts and lists."""
+    if isinstance(value, str):
+        return html.unescape(value)
+    if isinstance(value, dict):
+        return {k: _decode_html_entities(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_decode_html_entities(item) for item in value]
+    return value
+
+
 def normalize_extracted_document(
     document_type: DocumentType | str,
     extracted: Dict[str, Any],
@@ -1042,6 +1093,11 @@ def normalize_extracted_document(
     doc_type_value = (
         document_type.value if isinstance(document_type, DocumentType) else document_type
     )
+
+    # Decode HTML entities (e.g. &Oacute; → Ó) that OCR may produce
+    extracted = _decode_html_entities(extracted)
+    if isinstance(extraction_metadata, dict):
+        extraction_metadata = _decode_html_entities(extraction_metadata)
 
     print(f"Normalizing extracted data for document type: {doc_type_value}")
     print(f"Initial extracted data keys: {extraction_metadata}")
@@ -1350,12 +1406,23 @@ class OAMContractData(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    document_language: Optional[DocumentLanguageAnswer] = Field(
+        default=None,
+        description=(
+            "Primary language of the source document. "
+            "Return exactly one of: Spanish, English, Other."
+        ),
+    )
+
     # -------------------------------------------------------------------------
     # Maintenance Approach
     # -------------------------------------------------------------------------
     planned_maintenance_approach: Optional[str] = Field(
         default=None,
-        description="Description of the planned maintenance approach including frequency, scope, and methodology",
+        description=(
+            "Description of the planned maintenance approach including frequency, scope, and methodology. "
+            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
 
     # -------------------------------------------------------------------------
@@ -1434,6 +1501,14 @@ class ESHSESMSPoliciesData(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    document_language: Optional[DocumentLanguageAnswer] = Field(
+        default=None,
+        description=(
+            "Primary language of the source document. "
+            "Return exactly one of: Spanish, English, Other."
+        ),
+    )
+
     # -------------------------------------------------------------------------
     # ESMS Aligned with IFC Performance Standards
     # -------------------------------------------------------------------------
@@ -1504,18 +1579,6 @@ class ESHSESMSPoliciesData(BaseModel):
     # -------------------------------------------------------------------------
     # Document Metadata
     # -------------------------------------------------------------------------
-    document_date: Optional[str] = Field(
-        default=None,
-        description="Date of the policy document (YYYY-MM-DD if available)",
-    )
-    document_version: Optional[str] = Field(
-        default=None,
-        description="Version number or revision of the policy document",
-    )
-    company_name: Optional[str] = Field(
-        default=None,
-        description="Company name as stated in the document",
-    )
     valid_from: Optional[str] = Field(default=None, description="Validity start date (YYYY-MM-DD)")
     valid_to: Optional[str] = Field(default=None, description="Validity end date (YYYY-MM-DD)")
     scope_of_application: Optional[str] = Field(
@@ -1530,21 +1593,28 @@ class ESHSESMSPoliciesData(BaseModel):
         default=None,
         description="Social aspects covered (communities, workers)",
     )
-    monitoring_indicators: Optional[List[ESMPMonitoringIndicatorEntry]] = Field(
+    monitoring_indicators: Optional[List[str]] = Field(
         default=None,
-        description="Monitoring indicators with unit and frequency",
+        description=(
+            "Monitoring indicators as a flat list of strings. "
+            "Each string must combine the indicator name, unit, and frequency in the format: "
+            "'<indicator> | <unit> | <frequency>'. "
+            "If unit is not available, use 'N/A' in its place. "
+            "Example: 'Nivel visible de polvo reducido | N/A | Diario'."
+        ),
     )
     biodiversity_management_measures: Optional[str] = Field(
         default=None,
-        description="Biodiversity management measures",
+        description="Biodiversity management measures. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION,
     )
     community_impacts_management_measures: Optional[str] = Field(
         default=None,
-        description="Community impacts management measures",
+        description="Community impacts management measures. "
+        + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION,
     )
     climate_adaptation_measures: Optional[str] = Field(
         default=None,
-        description="Climate adaptation measures",
+        description="Climate adaptation measures. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION,
     )
 
 
@@ -1600,6 +1670,14 @@ class QAQCCommissioningData(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    document_language: Optional[DocumentLanguageAnswer] = Field(
+        default=None,
+        description=(
+            "Primary language of the source document. "
+            "Return exactly one of: Spanish, English, Other."
+        ),
+    )
 
     # -------------------------------------------------------------------------
     # Visual Inspection Summary
@@ -1658,6 +1736,14 @@ class IndustrialSafetyPlanData(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    document_language: Optional[DocumentLanguageAnswer] = Field(
+        default=None,
+        description=(
+            "Primary language of the source document. "
+            "Return exactly one of: Spanish, English, Other."
+        ),
+    )
+
     # -------------------------------------------------------------------------
     # Industrial Safety Plan Summary
     # -------------------------------------------------------------------------
@@ -1665,8 +1751,7 @@ class IndustrialSafetyPlanData(BaseModel):
         default=None,
         description=(
             "Summary of IFC-aligned HR practices described in the Industrial Safety Plan. "
-            "Return the summary in the exact same language as the source document. "
-            "Do not translate, normalize, or rewrite it into another language."
+            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
         ),
     )
 
@@ -1841,6 +1926,14 @@ class EmergencyResponseSecurityPlanData(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    document_language: Optional[DocumentLanguageAnswer] = Field(
+        default=None,
+        description=(
+            "Primary language of the source document. "
+            "Return exactly one of: Spanish, English, Other."
+        ),
+    )
+
     last_update_date: Optional[str] = Field(
         default=None,
         description="Last update date (YYYY-MM-DD)",
@@ -1855,7 +1948,7 @@ class EmergencyResponseSecurityPlanData(BaseModel):
     )
     climate_adaptation_actions: Optional[str] = Field(
         default=None,
-        description="Climate adaptation actions",
+        description="Climate adaptation actions. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION,
     )
     security_risks_covered: Optional[YesNoAnswer] = Field(
         default=None,
@@ -1863,15 +1956,16 @@ class EmergencyResponseSecurityPlanData(BaseModel):
     )
     security_arrangements: Optional[str] = Field(
         default=None,
-        description="Security arrangements",
+        description="Security arrangements. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION,
     )
     access_to_basic_resources_during_crisis: Optional[str] = Field(
         default=None,
-        description="Access to basic resources during crisis",
+        description="Access to basic resources during crisis. "
+        + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION,
     )
     emergency_response_protocols: Optional[str] = Field(
         default=None,
-        description="Emergency response protocols",
+        description="Emergency response protocols. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION,
     )
     coordination_with_authorities: Optional[YesNoAnswer] = Field(
         default=None,
@@ -1888,6 +1982,7 @@ class LandTitleDocumentEntry(BaseModel):
     document_type: Optional[str] = Field(default=None, description="Document type")
     document_number: Optional[str] = Field(default=None, description="Document number")
     document_date: Optional[str] = Field(default=None, description="Document date (YYYY-MM-DD)")
+    document_holder: Optional[str] = Field(default=None, description="Document holder name")
 
 
 class LeaseContractEntry(BaseModel):
@@ -1905,18 +2000,41 @@ class SiteLegalStatusSummaryData(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    document_language: Optional[DocumentLanguageAnswer] = Field(
+        default=None,
+        description=(
+            "Primary language of the source document. "
+            "Return exactly one of: Spanish, English, Other."
+        ),
+    )
+
     land_tenure_status: Optional[str] = Field(
         default=None,
-        description="Land tenure status (owned/leased/concession)",
+        description="Land tenure status (owned/leased/concession). "
+        + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION,
     )
     number_of_plots: Optional[int] = Field(default=None, description="Number of plots")
-    land_title_documents_listed: Optional[List[LandTitleDocumentEntry]] = Field(
-        default=None,
-        description="Land title documents (type, number, date)",
+    land_title_documents_listed: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Land title documents as a flat list of strings. "
+            "Each string must combine the document type, number, date, and holder in the format: "
+            "'<document_type> | <document_number> | <document_date> | <document_holder>'. "
+            "If a value is not available, use 'N/A' in its place. "
+            "Example: 'Escritura Pública | 1234 | 2021-03-15 | Juan Pérez'. "
+            "Return an empty list [] if no land title documents are found."
+        ),
     )
-    lease_contracts_listed: Optional[List[LeaseContractEntry]] = Field(
-        default=None,
-        description="Lease contracts (lessor, term, expiry)",
+    lease_contracts_listed: List[str] = Field(
+        default_factory=list,
+        description=(
+            "Lease contracts as a flat list of strings. "
+            "Each string must combine the lessor, term, and expiry in the format: "
+            "'<lessor> | <term> | <expiry>'. "
+            "If a value is not available, use 'N/A' in its place. "
+            "Example: 'Municipio de Quito | 30 years | 2045-12-31'. "
+            "Return an empty list [] if no lease contracts exist."
+        ),
     )
     collective_rights_indigenous_claims: Optional[YesNoAnswer] = Field(
         default=None,
@@ -1926,7 +2044,7 @@ class SiteLegalStatusSummaryData(BaseModel):
     )
     collective_rights_description: Optional[str] = Field(
         default=None,
-        description="Collective rights description",
+        description="Collective rights description. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION,
     )
     known_property_disputes: Optional[YesNoAnswer] = Field(
         default=None,
@@ -1942,7 +2060,7 @@ class SiteLegalStatusSummaryData(BaseModel):
     )
     expropriation_risk_description: Optional[str] = Field(
         default=None,
-        description="Expropriation risk description",
+        description="Expropriation risk description. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION,
     )
 
 
@@ -1985,7 +2103,7 @@ class NonOverlapProtectedAreasCertificateData(BaseModel):
         description="Geographic reference (coordinates or location reference)",
     )
     issuing_authority: Optional[str] = Field(default=None, description="Issuing authority")
-    date_of_issuance: Optional[str] = Field(
+    issuance_date: Optional[str] = Field(
         default=None,
         description="Date of issuance (YYYY-MM-DD)",
     )
@@ -1999,6 +2117,14 @@ class HRPolicyCodeOfConductData(BaseModel):
     """Schema for HR Policy / Code of Conduct (Section 2.11)."""
 
     model_config = ConfigDict(extra="forbid")
+
+    document_language: Optional[DocumentLanguageAnswer] = Field(
+        default=None,
+        description=(
+            "Primary language of the source document. "
+            "Return exactly one of: Spanish, English, Other."
+        ),
+    )
 
     human_rights_policy_exists: Optional[YesNoAnswer] = Field(
         default=None,
@@ -2042,7 +2168,13 @@ class HRPolicyCodeOfConductData(BaseModel):
     )
     supplier_labor_requirements: Optional[str] = Field(
         default=None,
-        description="Supplier labor requirements (extracted text)",
+        description=(
+            "Brief summary (2-4 sentences) of the labor and safety requirements that apply to "
+            "suppliers, contractors, and subcontractors — e.g. mandatory compliance with OHS/E&S "
+            "policies, contractual clauses, PPE obligations, and monitoring mechanisms. "
+            "Do NOT copy raw paragraphs from the document; write a concise summary. "
+            + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
 
 
@@ -2155,41 +2287,9 @@ class LandUsePermitData(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    permit_number: Optional[str] = Field(
-        default=None,
-        description="Land use permit number or reference",
-    )
     issue_date: Optional[str] = Field(
         default=None,
         description="Date the permit was issued (YYYY-MM-DD)",
-    )
-    expiry_date: Optional[str] = Field(
-        default=None,
-        description="Permit expiry date (YYYY-MM-DD)",
-    )
-    issuing_authority: Optional[str] = Field(
-        default=None,
-        description="Authority that issued the permit",
-    )
-    land_use_classification: Optional[str] = Field(
-        default=None,
-        description="Zoning or land use classification",
-    )
-    project_name: Optional[str] = Field(
-        default=None,
-        description="Project name as stated in the permit",
-    )
-    parcel_id: Optional[str] = Field(
-        default=None,
-        description="Land parcel ID or cadastral reference",
-    )
-    area_m2: Optional[float] = Field(
-        default=None,
-        description="Permitted area in square meters",
-    )
-    permit_status: Optional[str] = Field(
-        default=None,
-        description="Current status of the permit (Active/Expired/Pending)",
     )
     municipality_issuing_body: Optional[str] = Field(
         default=None,
@@ -2317,6 +2417,42 @@ class PermitsData(BaseModel):
     )
 
 
+class IECCertificateEvidenceData(BaseModel):
+    """Schema for a standalone IEC certificate uploaded for module or inverter evidence."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    standard_code: Optional[str] = Field(
+        default=None,
+        description=(
+            "IEC standard code explicitly confirmed in the certificate, e.g. IEC 61215, "
+            "IEC 61730, IEC TS 62804, IEC 62716, IEC 61701, IEC 62109, IEC 61727, IEC 61000. "
+            "Return null if the document does not confirm an IEC standard."
+        ),
+    )
+    validity_date: Optional[str] = Field(
+        default=None,
+        description=(
+            "Certificate validity or expiry date in YYYY-MM-DD format. "
+            "Return null if the document does not state a validity or expiry date."
+        ),
+    )
+
+
+class BloombergEvidenceData(BaseModel):
+    """Schema for a standalone Bloomberg evidence document uploaded for module or inverter."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rating: Optional[str] = Field(
+        default=None,
+        description=(
+            "BloombergNEF or Bloomberg qualification or rating explicitly shown in the document, "
+            "for example AAA, AA, A, or Tier 1. Return null if no rating is confirmed."
+        ),
+    )
+
+
 # =============================================================================
 # Classification Result Schema
 # =============================================================================
@@ -2374,6 +2510,11 @@ PYDANTIC_MODELS: dict[DocumentType, Type[BaseModel]] = {
     DocumentType.LAND_USE_PERMIT: LandUsePermitData,
     # Permits
     DocumentType.ELECTRICAL_UTILITY_FEASIBILITY_REPORT: ElectricalUtilityFeasibilityReportData,
+    # Equipment evidence (standalone uploads)
+    DocumentType.MODULE_IEC_CERTIFICATE: IECCertificateEvidenceData,
+    DocumentType.INVERTER_IEC_CERTIFICATE: IECCertificateEvidenceData,
+    DocumentType.MODULE_BLOOMBERG_EVIDENCE: BloombergEvidenceData,
+    DocumentType.INVERTER_BLOOMBERG_EVIDENCE: BloombergEvidenceData,
 }
 
 # Add Technical + Uncategorized schemas from landing_ai_poc_sdk2
@@ -2406,6 +2547,21 @@ try:
     )
 except Exception:
     pass
+
+
+# =============================================================================
+# Sub-type → Parent Requirement Mapping
+# =============================================================================
+
+# These document types are used only for targeted extraction schema selection.
+# They have no independent entry in the requirements database and must be
+# reported back to NestJS as their parent requirement type.
+DOCUMENT_TYPE_PARENT_REQUIREMENT: dict[DocumentType, DocumentType] = {
+    DocumentType.MODULE_IEC_CERTIFICATE: DocumentType.PROJECT_DATA_EQUIPMENT_SHEETS,
+    DocumentType.INVERTER_IEC_CERTIFICATE: DocumentType.PROJECT_DATA_EQUIPMENT_SHEETS,
+    DocumentType.MODULE_BLOOMBERG_EVIDENCE: DocumentType.PROJECT_DATA_EQUIPMENT_SHEETS,
+    DocumentType.INVERTER_BLOOMBERG_EVIDENCE: DocumentType.PROJECT_DATA_EQUIPMENT_SHEETS,
+}
 
 
 def get_extraction_model(document_type: DocumentType) -> Optional[Type[BaseModel]]:
