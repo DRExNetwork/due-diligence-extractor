@@ -544,7 +544,7 @@ def _generate_summary_with_openai(req: SummaryGenerationRequest) -> SummaryGener
     from openai import OpenAI
 
     model_name = req.model or os.getenv("SUMMARY_MODEL") or os.getenv("LLM_MODEL")
-    model_name = model_name or "gpt-5-nano-2025-08-07"
+    model_name = model_name or "gpt-5.4-mini-2026-03-17"
 
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
@@ -577,6 +577,7 @@ def _generate_summary_with_openai(req: SummaryGenerationRequest) -> SummaryGener
     if not content:
         raise RuntimeError("LLM returned empty response for summary generation")
 
+    content = content.encode("utf-8", errors="ignore").decode("utf-8", errors="ignore").strip()
     parsed = json.loads(content)
 
     output_sections: List[SummarySectionOutput] = []
