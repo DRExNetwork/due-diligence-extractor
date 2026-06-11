@@ -19,9 +19,9 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 # Top-Level Categories (Level 1)
 # =============================================================================
 DocumentLanguageAnswer = Literal["Spanish", "English", "Other"]
-YesNoAnswer = Literal["Yes", "No"]
+YesNoAnswer = Literal["Sí", "No"]
 YES_NO_RESPONSE_INSTRUCTION = (
-    "Return exactly one of: Yes, No. " "Do not return true/false or any other variant."
+    "Return exactly one of: Sí, No. " "Do not return true/false or any other variant."
 )
 SOURCE_LANGUAGE_RESPONSE_INSTRUCTION = (
     "Return the response in the language indicated by document_language. "
