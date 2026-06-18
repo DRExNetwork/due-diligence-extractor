@@ -366,7 +366,9 @@ class EnergyConsumptionBillsData(BaseModel):
     # -------------------------------------------------------------------------
     # Billing Period Identification
     # -------------------------------------------------------------------------
-    month: str = Field(description="Calendar month of the billing period as the full English month name (e.g., 'January', 'February'). Always return the month name, never a number.")
+    month: str = Field(
+        description="Calendar month of the billing period as the full English month name (e.g., 'January', 'February'). Always return the month name, never a number."
+    )
     year: Optional[int] = Field(
         default=None,
         description="Calendar year of the billing period (e.g., 2025)",
@@ -1525,7 +1527,7 @@ class ESHSESMSPoliciesData(BaseModel):
     ohs_procedures_summary: Optional[str] = Field(
         default=None,
         description=(
-            "Summary of Occupational Health and Safety procedures (max 4 lines). "
+            "Summary of Occupational Health and Safety procedures (max 2-3 lines). "
             "Key safety protocols and procedures. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
         ),
     )
@@ -1685,7 +1687,7 @@ class QAQCCommissioningData(BaseModel):
     visual_inspection_summary: Optional[str] = Field(
         default=None,
         description=(
-            "Summary of visual inspection findings. Overall condition assessment. "
+            "Summary of visual inspection findings. Overall condition assessment (max 2-3 lines). "
             + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
         ),
     )
@@ -1750,7 +1752,7 @@ class IndustrialSafetyPlanData(BaseModel):
     ifc_aligned_hr_practices_summary: Optional[str] = Field(
         default=None,
         description=(
-            "Summary of IFC-aligned HR practices described in the Industrial Safety Plan. "
+            "Summary of IFC-aligned HR practices described in the Industrial Safety Plan (max 2-3 lines). "
             + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
         ),
     )
@@ -1815,7 +1817,7 @@ class EnvironmentalLicenceEIAData(BaseModel):
     biodiversity_impacts_summary: Optional[str] = Field(
         default=None,
         description=(
-            "Biodiversity impacts summary in 2-4 lines. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+            "Biodiversity impacts summary in 2-3 lines. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
         ),
     )
 
@@ -1837,7 +1839,7 @@ class EnvironmentalLicenceEIAData(BaseModel):
     mitigation_measures_summary: Optional[str] = Field(
         default=None,
         description=(
-            "Mitigation measures summary in 2-4 lines. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+            "Mitigation measures summary in 2-3 lines. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
         ),
     )
 
@@ -1906,7 +1908,7 @@ class EnvironmentalLicenceEIAData(BaseModel):
     public_consultation_summary: Optional[str] = Field(
         default=None,
         description=(
-            "Public consultation summary in 2-4 lines. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+            "Public consultation summary in 2-3 lines. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
         ),
     )
 
@@ -2052,7 +2054,9 @@ class SiteLegalStatusSummaryData(BaseModel):
     )
     property_disputes_summary: Optional[str] = Field(
         default=None,
-        description=("Property disputes summary. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION),
+        description=(
+            "Property disputes summary (max 2-3 lines). " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
     expropriation_risk_identified: Optional[YesNoAnswer] = Field(
         default=None,
