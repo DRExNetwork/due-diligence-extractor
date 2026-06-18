@@ -195,18 +195,24 @@ def _research_certificates(client: Any, brand: str, is_inverter: bool) -> List[D
             brand_name=brand,
             current_year=CURRENT_YEAR,
         )
-        results = _run_search(client, query, max_results=1)
+        results = _run_search(client, query, max_results=3)
 
         certificate_name = None
         source = ""
         validity_date = None
 
-        if results:
-            first = results[0]
-            certificate_name = getattr(first, "title", None) or None
-            source = getattr(first, "url", "") or ""
-            snippet = getattr(first, "snippet", "") or ""
+        _generic = {"certificate", "pdf certificate", "certifiacte", "document", "datasheet"}
+
+        for result in results:
+            title = (getattr(result, "title", "") or "").strip()
+            # Skip spaced-out "[PDF] C E R T I F I C A T E" style titles and plain generic words
+            if re.sub(r"\s+", " ", title).lower().strip("[]pdf ") in _generic:
+                continue
+            certificate_name = title or None
+            source = getattr(result, "url", "") or ""
+            snippet = getattr(result, "snippet", "") or ""
             validity_date = _extract_date_from_text(snippet)
+            break
 
         certificates.append(
             {

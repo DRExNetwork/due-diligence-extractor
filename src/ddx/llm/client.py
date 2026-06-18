@@ -15,7 +15,7 @@ load_dotenv()
 class LLMClient:
     def __init__(self, provider: str = "openai", model: Optional[str] = None):
         self.provider = provider
-        self.model = model or os.getenv("LLM_MODEL") or "gpt-4.1-2025-04-14"
+        self.model = model or os.getenv("LLM_MODEL") or "gpt-5.4-mini-2026-03-17"
         self._openai = None
         if provider == "openai":
             self._init_openai()
