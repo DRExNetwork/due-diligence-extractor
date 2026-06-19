@@ -163,6 +163,7 @@ class DocumentResult(BaseModel):
     extraction_metadata: Optional[Dict[str, Any]] = None
     field_grounding: Optional[Dict[str, Any]] = None
     markdown_content: Optional[str] = None
+    api_metadata: Optional[str] = None  # API response metadata (e.g., credit_usage, token count)
     success: bool = True
     error: Optional[str] = None
 
@@ -208,6 +209,7 @@ class FieldExtractionResult(BaseModel):
     extracted_fields: Dict[str, Any]
     extraction_metadata: Optional[Dict[str, Any]] = None
     field_grounding: Optional[Dict[str, Any]] = None
+    api_metadata: Optional[str] = None  # API response metadata (e.g., credit_usage, token count)
     success: bool = True
     error: Optional[str] = None
 
@@ -1212,6 +1214,7 @@ async def _async_extract(
     return {
         "extraction": getattr(response, "extraction", {}) or {},
         "extraction_metadata": getattr(response, "extraction_metadata", None),
+        "metadata": getattr(response, "metadata", None),
     }
 
 
@@ -1420,6 +1423,7 @@ async def _process_single_document(
         # Step 4: Resolve grounding locations from extraction references
         ext_meta = extract_raw.get("extraction_metadata")
         grounding = _resolve_field_grounding(ext_meta, parse_response)
+        api_meta = extract_raw.get("metadata")
 
         return DocumentResult(
             file_name=file_name,
@@ -1430,6 +1434,7 @@ async def _process_single_document(
             extraction_metadata=ext_meta,
             field_grounding=grounding,
             markdown_content=markdown_content if save_markdown else None,
+            api_metadata=str(api_meta) if api_meta else None,
             success=True,
         )
 
@@ -1955,6 +1960,7 @@ async def extract_specific_fields_async(
         _print_extracted_variables(file_name, extracted)
 
         grounding = _resolve_field_grounding(ext_meta, parse_response)
+        api_meta = raw.get("metadata")
 
         return FieldExtractionResult(
             file_name=file_name,
@@ -1964,6 +1970,7 @@ async def extract_specific_fields_async(
             extracted_fields=extracted,
             extraction_metadata=ext_meta,
             field_grounding=grounding,
+            api_metadata=str(api_meta) if api_meta else None,
             success=True,
         )
 
@@ -2183,6 +2190,7 @@ async def extract_document_direct_async(
 
         ext_meta = extract_raw.get("extraction_metadata")
         grounding = _resolve_field_grounding(ext_meta, parse_response)
+        api_meta = extract_raw.get("metadata")
 
         return DocumentResult(
             file_name=file_name,
@@ -2192,6 +2200,7 @@ async def extract_document_direct_async(
             extracted_data=extracted,
             extraction_metadata=ext_meta,
             field_grounding=grounding,
+            api_metadata=str(api_meta) if api_meta else None,
             success=True,
         )
 

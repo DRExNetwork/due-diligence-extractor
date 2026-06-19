@@ -47,6 +47,7 @@ from ddx.classification.categories import TopLevelCategory
 from ddx.classification.landing_ai_poc_sdk import should_disable_cross_document_validation
 from ddx.classification.categories import DocumentType, DOCUMENT_TYPE_PARENT_REQUIREMENT
 from ddx.api.equipment_research import run_equipment_research_async
+from ddx.utils.token_tracker import track_extraction_metrics
 
 from ddx.api.models import (
     BulkIngestionRequest,
@@ -143,6 +144,9 @@ _RESEARCH_FIELDS: List[str] = [
     "inverter_certificate_evidence",
     "inverter_test_evidence",
 ]
+
+_UNCATEGORIZED_DOCUMENT_TYPE = "Uncategorized Document"
+
 
 _UNCATEGORIZED_DOCUMENT_TYPE = "Uncategorized Document"
 
@@ -1445,7 +1449,9 @@ async def _process_all_categories(
     _fill_missing_files(best_per_file, req.s3_paths, path_mapping)
 
     resolved = ResolvedFiles(req.s3_paths, path_mapping)
-    processed = _convert_document_results(list(best_per_file.values()), resolved.s3_lookup)
+    processed = _convert_document_results(
+        list(best_per_file.values()), resolved.s3_lookup, project_id=req.project_id
+    )
     validated = _serialize_validated_results(all_validated)
 
     return processed, validated
@@ -1551,7 +1557,9 @@ async def _bulk_ingest_with_category(
     top_level = parse_top_level_category(req.top_level_category)
     batch_result = await _process_with_category(resolved.file_paths, top_level, req)
 
-    processed = _convert_document_results(batch_result.results, resolved.s3_lookup)
+    processed = _convert_document_results(
+        batch_result.results, resolved.s3_lookup, project_id=req.project_id
+    )
     validated = _serialize_validated_results(batch_result.validated_results)
     return processed, validated
 
@@ -1713,20 +1721,30 @@ def _assemble_targeted_response(
     research_source_filename: Optional[str] = None,
 ) -> TargetedCompletionResponse:
     """Convert extraction results into targeted response."""
-    individual = [
-        TargetedDocumentResult(
-            file_name=r.file_name,
-            s3_path=resolved.s3_lookup.get(r.file_name),
-            document_type=r.document_type,
-            top_level_category=r.top_level_category,
-            extracted_data=r.extracted_data,
-            extraction_metadata=r.extraction_metadata,
-            field_grounding=r.field_grounding,
-            success=r.success,
-            error=r.error,
+    individual = []
+    for r in results_list:
+        # Log extraction metrics for successful extractions
+        if r.success and r.api_metadata:
+            log.info(
+                "Extracted document | file=%s | doc_type=%s | metadata=%s",
+                r.file_name,
+                r.document_type,
+                r.api_metadata,
+            )
+
+        individual.append(
+            TargetedDocumentResult(
+                file_name=r.file_name,
+                s3_path=resolved.s3_lookup.get(r.file_name),
+                document_type=r.document_type,
+                top_level_category=r.top_level_category,
+                extracted_data=r.extracted_data,
+                extraction_metadata=r.extraction_metadata,
+                field_grounding=r.field_grounding,
+                success=r.success,
+                error=r.error,
+            )
         )
-        for r in results_list
-    ]
 
     consolidated = _serialize_targeted_validated_result(validated_result)
     if consolidated and research_payload:
@@ -1851,12 +1869,15 @@ def _build_file_level_results(
             )
         details.append(detail)
 
-        if fr.success and fr.extracted_fields:
-            log.info(
-                "Validation extracted variables for file=%s: %s",
-                fr.file_name,
-                _truncate_for_log(fr.extracted_fields),
-            )
+        if fr.success:
+            if fr.api_metadata:
+                log.info("Extracted fields | file=%s | metadata=%s", fr.file_name, fr.api_metadata)
+            if fr.extracted_fields:
+                log.info(
+                    "Validation extracted variables for file=%s: %s",
+                    fr.file_name,
+                    _truncate_for_log(fr.extracted_fields),
+                )
 
     return details, errors
 
@@ -2038,22 +2059,76 @@ def _build_empty_validation_response(
 def _convert_document_results(
     results: List[DocumentResult],
     s3_path_lookup: Dict[str, str],
+    project_id: Optional[str] = None,
 ) -> List[BulkDocumentResult]:
     """Convert internal DocumentResult list to API BulkDocumentResult list."""
-    return [
-        BulkDocumentResult(
-            file_name=r.file_name,
-            s3_path=s3_path_lookup.get(r.file_name),
-            document_type=r.document_type,
-            top_level_category=r.top_level_category,
-            extracted_data=r.extracted_data,
-            extraction_metadata=r.extraction_metadata,
-            field_grounding=r.field_grounding,
-            success=r.success,
-            error=r.error,
+    bulk_results = []
+    for r in results:
+        # Log extraction metrics for successful extractions
+        if r.success:
+            log.info(
+                "Document extraction completed | file=%s | doc_type=%s | api_metadata=%s",
+                r.file_name,
+                r.document_type,
+                r.api_metadata,
+            )
+
+            # Track token consumption if project_id is provided
+            if project_id and r.api_metadata:
+                _extract_and_track_metadata(project_id, r)
+
+        bulk_results.append(
+            BulkDocumentResult(
+                file_name=r.file_name,
+                s3_path=s3_path_lookup.get(r.file_name),
+                document_type=r.document_type,
+                top_level_category=r.top_level_category,
+                extracted_data=r.extracted_data,
+                extraction_metadata=r.extraction_metadata,
+                field_grounding=r.field_grounding,
+                success=r.success,
+                error=r.error,
+            )
         )
-        for r in results
-    ]
+    return bulk_results
+
+
+def _extract_and_track_metadata(project_id: str, document_result: DocumentResult) -> None:
+    """Extract metadata from DocumentResult and track token usage."""
+    try:
+        metadata = document_result.api_metadata
+        if not metadata:
+            return
+
+        # Handle both string and object representations of metadata
+        if isinstance(metadata, str):
+            # Try to parse metadata string if it's a Metadata repr
+            import re
+            match = re.search(r"credit_usage=(\d+\.?\d*)", str(metadata))
+            credit_usage = float(match.group(1)) if match else None
+
+            match = re.search(r"duration_ms=(\d+)", str(metadata))
+            duration_ms = int(match.group(1)) if match else None
+
+            match = re.search(r"job_id='([^']+)'", str(metadata))
+            job_id = match.group(1) if match else None
+        else:
+            # Assume it's an object with attributes
+            credit_usage = getattr(metadata, "credit_usage", None)
+            duration_ms = getattr(metadata, "duration_ms", None)
+            job_id = getattr(metadata, "job_id", None)
+
+        track_extraction_metrics(
+            project_id=project_id,
+            file_name=document_result.file_name,
+            document_type=document_result.document_type,
+            credit_usage=credit_usage,
+            duration_ms=duration_ms,
+            job_id=job_id,
+            success=True,
+        )
+    except Exception as e:
+        log.warning(f"Failed to track metadata for {document_result.file_name}: {e}")
 
 
 def _serialize_validated_results(
