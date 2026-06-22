@@ -18,22 +18,27 @@ CURRENT_YEAR = datetime.now().year
 IEC_STANDARDS: List[Dict[str, str]] = [
     {
         "code": "IEC 61215",
+        "certificate_name": "Módulos fotovoltaicos (FV) terrestres - Calificación del diseño y aprobación de tipo.",
         "url_query_template": "latest {current_year} {brand_name} solar module IEC 61215 certificate validity date official datasheet pdf",
     },
     {
         "code": "IEC 61730",
+        "certificate_name": "Calificación de seguridad de los módulos fotovoltaicos (FV).",
         "url_query_template": "latest {current_year} {brand_name} solar module IEC 61730 certificate validity date official datasheet pdf",
     },
     {
         "code": "IEC TS 62804",
+        "certificate_name": "Módulos fotovoltaicos (FV) - Métodos de prueba para la detección de la degradación inducida por potencial (PID).",
         "url_query_template": "latest {current_year} {brand_name} solar module PID test IEC TS 62804 certificate validity date official report pdf",
     },
     {
         "code": "IEC 62716",
+        "certificate_name": "Módulos fotovoltaicos (FV) - Prueba de corrosión por amoníaco.",
         "url_query_template": "latest {current_year} {brand_name} solar module IEC 62716 certificate validity date official datasheet pdf",
     },
     {
         "code": "IEC 61701",
+        "certificate_name": "Módulos fotovoltaicos (FV) - Prueba de corrosión por niebla salina.",
         "url_query_template": "latest {current_year} {brand_name} solar module IEC 61701 certificate validity date official datasheet pdf",
     },
 ]
@@ -42,14 +47,17 @@ IEC_STANDARDS: List[Dict[str, str]] = [
 IEC_INVERTER_STANDARDS: List[Dict[str, str]] = [
     {
         "code": "IEC 62109",
+        "certificate_name": "Seguridad de los convertidores de potencia para uso en sistemas de energía fotovoltaica.",
         "url_query_template": "latest {current_year} {brand_name} inverter IEC 62109 certificate validity date official datasheet pdf",
     },
     {
         "code": "IEC 61727",
+        "certificate_name": "Sistemas fotovoltaicos (FV) - Características de la interfaz de la red eléctrica.",
         "url_query_template": "latest {current_year} {brand_name} inverter IEC 61727 certificate validity date official datasheet pdf",
     },
     {
         "code": "IEC 61000",
+        "certificate_name": "Compatibilidad Electromagnética (CEM o EMC).",
         "url_query_template": "latest {current_year} {brand_name} inverter IEC 61000 certificate validity date official datasheet pdf",
     },
 ]
@@ -82,7 +90,7 @@ def _default_payload(module_brand: Optional[str], inverter_brand: Optional[str])
         "module_brand": module_brand or "",
         "module_bloomberg": {"rating": "Unknown", "source": ""},
         "module_certificate_evidence": [
-            {"standard_code": std["code"], "certificate_name": None, "source": None, "validity_date": None}
+            {"standard_code": std["code"], "certificate_name": std["certificate_name"], "source": None, "validity_date": None}
             for std in IEC_STANDARDS
         ],
         "module_factory_test_date": None,
@@ -93,7 +101,7 @@ def _default_payload(module_brand: Optional[str], inverter_brand: Optional[str])
         "inverter_brand": inverter_brand or "",
         "inverter_bloomberg": {"rating": "Unknown", "source": ""},
         "inverter_certificate_evidence": [
-            {"standard_code": std["code"], "certificate_name": None, "source": None, "validity_date": None}
+            {"standard_code": std["code"], "certificate_name": std["certificate_name"], "source": None, "validity_date": None}
             for std in IEC_INVERTER_STANDARDS
         ],
         "inverter_test_evidence": [
@@ -197,7 +205,7 @@ def _research_certificates(client: Any, brand: str, is_inverter: bool) -> List[D
         )
         results = _run_search(client, query, max_results=3)
 
-        certificate_name = None
+        certificate_name = standard["certificate_name"]
         source = ""
         validity_date = None
 
@@ -208,7 +216,6 @@ def _research_certificates(client: Any, brand: str, is_inverter: bool) -> List[D
             # Skip spaced-out "[PDF] C E R T I F I C A T E" style titles and plain generic words
             if re.sub(r"\s+", " ", title).lower().strip("[]pdf ") in _generic:
                 continue
-            certificate_name = title or None
             source = getattr(result, "url", "") or ""
             snippet = getattr(result, "snippet", "") or ""
             validity_date = _extract_date_from_text(snippet)
