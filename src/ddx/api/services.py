@@ -47,7 +47,6 @@ from ddx.classification.categories import TopLevelCategory
 from ddx.classification.landing_ai_poc_sdk import should_disable_cross_document_validation
 from ddx.classification.categories import DocumentType, DOCUMENT_TYPE_PARENT_REQUIREMENT
 from ddx.api.equipment_research import run_equipment_research_async
-from ddx.utils.token_tracker import track_extraction_metrics
 
 from ddx.api.models import (
     BulkIngestionRequest,
@@ -1450,7 +1449,7 @@ async def _process_all_categories(
 
     resolved = ResolvedFiles(req.s3_paths, path_mapping)
     processed = _convert_document_results(
-        list(best_per_file.values()), resolved.s3_lookup, project_id=req.project_id
+        list(best_per_file.values()), resolved.s3_lookup
     )
     validated = _serialize_validated_results(all_validated)
 
@@ -1557,9 +1556,7 @@ async def _bulk_ingest_with_category(
     top_level = parse_top_level_category(req.top_level_category)
     batch_result = await _process_with_category(resolved.file_paths, top_level, req)
 
-    processed = _convert_document_results(
-        batch_result.results, resolved.s3_lookup, project_id=req.project_id
-    )
+    processed = _convert_document_results(batch_result.results, resolved.s3_lookup)
     validated = _serialize_validated_results(batch_result.validated_results)
     return processed, validated
 
@@ -1732,6 +1729,7 @@ def _assemble_targeted_response(
                 r.api_metadata,
             )
 
+        meta = _parse_api_metadata(r.api_metadata)
         individual.append(
             TargetedDocumentResult(
                 file_name=r.file_name,
@@ -1743,6 +1741,10 @@ def _assemble_targeted_response(
                 field_grounding=r.field_grounding,
                 success=r.success,
                 error=r.error,
+                api_metadata=r.api_metadata,
+                credit_usage=meta["credit_usage"],
+                duration_ms=meta["duration_ms"],
+                job_id=meta["job_id"],
             )
         )
 
@@ -1852,11 +1854,14 @@ def _build_file_level_results(
     errors: List[DocumentProcessingError] = []
 
     for fr in field_results:
+        meta = _parse_api_metadata(getattr(fr, "api_metadata", None))
         detail: Dict[str, Any] = {
             "file_name": fr.file_name,
             "s3_path": s3_lookup.get(fr.file_name),
             "success": fr.success,
             "extracted_fields": fr.extracted_fields,
+            "api_metadata": getattr(fr, "api_metadata", None),
+            "credit_usage": meta["credit_usage"],
         }
         if fr.error:
             detail["error"] = fr.error
@@ -2021,6 +2026,7 @@ async def validation_correction(
                 _truncate_for_log(merged_values),
             )
         overall_status = _compute_overall_validation_status(extracted_fields, req.expected_values)
+        api_metadata, credit_usage = _aggregate_validation_credits(field_results)
 
         return ValidationCorrectionResponse(
             document_type=doc_type,
@@ -2030,6 +2036,8 @@ async def validation_correction(
             extracted_fields=extracted_fields,
             overall_validation_status=overall_status,
             file_results=file_details,
+            api_metadata=api_metadata,
+            credit_usage=credit_usage,
             errors=errors,
         )
 
@@ -2059,7 +2067,6 @@ def _build_empty_validation_response(
 def _convert_document_results(
     results: List[DocumentResult],
     s3_path_lookup: Dict[str, str],
-    project_id: Optional[str] = None,
 ) -> List[BulkDocumentResult]:
     """Convert internal DocumentResult list to API BulkDocumentResult list."""
     bulk_results = []
@@ -2073,10 +2080,7 @@ def _convert_document_results(
                 r.api_metadata,
             )
 
-            # Track token consumption if project_id is provided
-            if project_id and r.api_metadata:
-                _extract_and_track_metadata(project_id, r)
-
+        meta = _parse_api_metadata(r.api_metadata)
         bulk_results.append(
             BulkDocumentResult(
                 file_name=r.file_name,
@@ -2088,47 +2092,76 @@ def _convert_document_results(
                 field_grounding=r.field_grounding,
                 success=r.success,
                 error=r.error,
+                api_metadata=r.api_metadata,
+                credit_usage=meta["credit_usage"],
+                duration_ms=meta["duration_ms"],
+                job_id=meta["job_id"],
             )
         )
     return bulk_results
 
 
-def _extract_and_track_metadata(project_id: str, document_result: DocumentResult) -> None:
-    """Extract metadata from DocumentResult and track token usage."""
+def _parse_api_metadata(metadata: Any) -> Dict[str, Any]:
+    """Parse credit_usage / duration_ms / job_id from a DocumentResult.api_metadata value.
+
+    api_metadata is stored as a ``str(...)`` repr of the extraction SDK Metadata
+    object (see extraction_api.py), so we parse it tolerantly whether it arrives
+    as that string repr or as an object exposing the attributes directly.
+    """
+    parsed: Dict[str, Any] = {
+        "credit_usage": None,
+        "duration_ms": None,
+        "job_id": None,
+    }
+    if not metadata:
+        return parsed
+
     try:
-        metadata = document_result.api_metadata
-        if not metadata:
-            return
-
-        # Handle both string and object representations of metadata
         if isinstance(metadata, str):
-            # Try to parse metadata string if it's a Metadata repr
-            import re
-            match = re.search(r"credit_usage=(\d+\.?\d*)", str(metadata))
-            credit_usage = float(match.group(1)) if match else None
+            match = re.search(r"credit_usage=(\d+\.?\d*)", metadata)
+            parsed["credit_usage"] = float(match.group(1)) if match else None
 
-            match = re.search(r"duration_ms=(\d+)", str(metadata))
-            duration_ms = int(match.group(1)) if match else None
+            match = re.search(r"duration_ms=(\d+)", metadata)
+            parsed["duration_ms"] = int(match.group(1)) if match else None
 
-            match = re.search(r"job_id='([^']+)'", str(metadata))
-            job_id = match.group(1) if match else None
+            match = re.search(r"job_id='([^']+)'", metadata)
+            parsed["job_id"] = match.group(1) if match else None
         else:
-            # Assume it's an object with attributes
             credit_usage = getattr(metadata, "credit_usage", None)
-            duration_ms = getattr(metadata, "duration_ms", None)
-            job_id = getattr(metadata, "job_id", None)
+            parsed["credit_usage"] = (
+                float(credit_usage) if credit_usage is not None else None
+            )
+            parsed["duration_ms"] = getattr(metadata, "duration_ms", None)
+            parsed["job_id"] = getattr(metadata, "job_id", None)
+    except (ValueError, TypeError) as e:
+        log.warning("Failed to parse api_metadata %r: %s", metadata, e)
 
-        track_extraction_metrics(
-            project_id=project_id,
-            file_name=document_result.file_name,
-            document_type=document_result.document_type,
-            credit_usage=credit_usage,
-            duration_ms=duration_ms,
-            job_id=job_id,
-            success=True,
-        )
-    except Exception as e:
-        log.warning(f"Failed to track metadata for {document_result.file_name}: {e}")
+    return parsed
+
+
+def _aggregate_validation_credits(
+    field_results: list,
+) -> Tuple[Optional[str], Optional[float]]:
+    """Sum credit_usage across field-extraction results for the validate path.
+
+    Returns ``(api_metadata, credit_usage)`` where api_metadata is the raw repr
+    of the first processed file and credit_usage is the total across all files
+    (None when no file reported any credit usage).
+    """
+    first_metadata: Optional[str] = None
+    credit_total = 0.0
+    credit_seen = False
+
+    for fr in field_results:
+        metadata = getattr(fr, "api_metadata", None)
+        if metadata and first_metadata is None:
+            first_metadata = metadata
+        parsed = _parse_api_metadata(metadata)
+        if parsed["credit_usage"] is not None:
+            credit_total += parsed["credit_usage"]
+            credit_seen = True
+
+    return first_metadata, (credit_total if credit_seen else None)
 
 
 def _serialize_validated_results(
