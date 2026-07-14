@@ -15,6 +15,11 @@ from urllib.parse import quote
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from ddx.classification.cnel_energy_bill import (
+    CnelEnergyBillData,
+    normalize_cnel_energy_bill,
+)
+
 # =============================================================================
 # Top-Level Categories (Level 1)
 # =============================================================================
@@ -99,6 +104,14 @@ class DocumentType(str, Enum):
     # Permits Documents
     ELECTRICAL_UTILITY_FEASIBILITY_REPORT = "Electrical Utility Feasibility Report"
     LAND_USE_PERMIT = "Land Use Permit"
+
+    # Energy Monitoring — Financial module (Epic PD-236 / PD-269, NOT Data Room).
+    # The value slugs to "cnel_energy_bill" — the document_type the NestJS bill
+    # pipeline sends to POST /api/v1/extract/validate. Do not rename.
+    # Deliberately ABSENT from DOCUMENT_TYPE_TO_TOP_LEVEL: that registry feeds the
+    # bulk-ingest classification prompts (build_classification_schema_for_category),
+    # and this type must never become a Data Room classification candidate.
+    CNEL_ENERGY_BILL = "CNEL Energy Bill"
 
     # Uncategorized
     UNCATEGORIZED = "Uncategorized Document"
@@ -218,6 +231,8 @@ DOCUMENT_TYPE_DESCRIPTIONS: dict[DocumentType, str] = {
     DocumentType.LAND_USE_PERMIT: "Land use permit or zoning approval for the project site",
     # Permits
     DocumentType.ELECTRICAL_UTILITY_FEASIBILITY_REPORT: "Utility feasibility report from the electrical distribution company containing capacity requested, feasibility status, available hosting capacity, maximum permitted annual generation, regulatory framework, issue date, and validity period",
+    # Energy Monitoring — Financial module (never a Data Room classification candidate)
+    DocumentType.CNEL_ENERGY_BILL: "Monthly CNEL EP electricity bill for an SGDA subscriber (net-metered) — Energy Monitoring bill-upload pipeline (PD-269), extracted via extract/validate only",
     # Uncategorized
     DocumentType.UNCATEGORIZED: "Documents that do not fit into any of the predefined categories",
 }
@@ -1119,6 +1134,11 @@ def normalize_extracted_document(
             normalized.get("geographical_coordinates")
         )
         return normalized, extraction_metadata
+
+    if doc_type_value == DocumentType.CNEL_ENERGY_BILL.value:
+        # Capture-and-reduce: derive BillFacts from the verbatim detail_rows
+        # (per-tariff reducer, invariants, grounding provenance — fails closed).
+        return normalize_cnel_energy_bill(extracted, extraction_metadata)
 
     return extracted, extraction_metadata
 
@@ -2519,6 +2539,8 @@ PYDANTIC_MODELS: dict[DocumentType, Type[BaseModel]] = {
     DocumentType.INVERTER_IEC_CERTIFICATE: IECCertificateEvidenceData,
     DocumentType.MODULE_BLOOMBERG_EVIDENCE: BloombergEvidenceData,
     DocumentType.INVERTER_BLOOMBERG_EVIDENCE: BloombergEvidenceData,
+    # Energy Monitoring — Financial module (extract/validate only; see the enum note)
+    DocumentType.CNEL_ENERGY_BILL: CnelEnergyBillData,
 }
 
 # Add Technical + Uncategorized schemas from landing_ai_poc_sdk2

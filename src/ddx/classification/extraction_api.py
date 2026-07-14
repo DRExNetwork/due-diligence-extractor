@@ -19,6 +19,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import tempfile
 from datetime import datetime, timezone
 from io import BytesIO
@@ -218,6 +219,8 @@ class FieldExtractionResult(BaseModel):
 # Grounding Resolver — maps extraction_metadata references → page locations
 # =============================================================================
 
+_grounding_log = logging.getLogger("ddx.grounding")
+
 
 def _build_chunk_lookup(parse_response: Any) -> Dict[str, dict]:
     """
@@ -345,11 +348,17 @@ def _resolve_references_to_locations(
         for grounding in chunk_grounding:
             if not isinstance(grounding, dict):
                 continue
+            box = grounding.get("box")
+            if not isinstance(box, dict) or not box:
+                # A location without a box cannot render a highlight — consumers
+                # (NestJS normalizeGrounding) drop it anyway. Skip it here so the
+                # resolution summary counts honestly (T6.14).
+                continue
             locations.append(
                 {
                     "chunk_id": ref_key,
                     "page": grounding.get("page", 0),
-                    "bounding_box": grounding.get("box", {}),
+                    "bounding_box": box,
                     "chunk_type": chunk.get("chunk_type") or chunk.get("type"),
                 }
             )
@@ -379,7 +388,18 @@ def _resolve_meta_entry(
                 )
             return combined
 
-        return [_resolve_meta_dict(item, chunk_lookup) for item in meta if isinstance(item, dict)]
+        # T8.9: drop per-row dicts in which no cell resolved — otherwise
+        # detail_rows ships [{}, {}, …], which is truthy and over-reports the
+        # "resolved X/Y fields" summary.
+        resolved_rows = [
+            resolved
+            for item in meta
+            if isinstance(item, dict)
+            for resolved in [_resolve_meta_dict(item, chunk_lookup)]
+            if resolved
+        ]
+
+        return resolved_rows or None
     return None
 
 
@@ -387,11 +407,15 @@ def _resolve_meta_dict(
     item: Dict[str, Any],
     chunk_lookup: Dict[str, dict],
 ) -> Dict[str, Any]:
-    """Resolve all sub-fields within a single array element dict."""
+    """Resolve all sub-fields within a single array element dict.
+
+    T8.9: sub-fields whose references matched nothing (empty list) are pruned —
+    an empty cell entry renders no highlight and must not count as resolved.
+    """
     resolved: Dict[str, Any] = {}
     for sub_field, sub_meta in item.items():
         entry = _resolve_meta_entry(sub_meta, chunk_lookup)
-        if entry is not None:
+        if entry:
             resolved[sub_field] = entry
     return resolved
 
@@ -413,13 +437,37 @@ def _resolve_field_grounding(
 
     chunk_lookup = _build_chunk_lookup(parse_response)
     if not chunk_lookup:
+        # Silent-empty grounding was a live debugging sink (T6.14) — say why.
+        _grounding_log.warning(
+            "grounding: chunk lookup is EMPTY (parse response without chunks/"
+            "grounding map) — 0/%d fields resolved",
+            len(extraction_metadata),
+        )
         return None
 
     grounding: Dict[str, Any] = {}
+    unresolved: List[str] = []
     for field_name, meta in extraction_metadata.items():
         entry = _resolve_meta_entry(meta, chunk_lookup)
-        if entry is not None:
+        if entry:
             grounding[field_name] = entry
+        else:
+            # None (no references) and [] (references that matched nothing or
+            # only box-less locations) both mean: no highlight possible.
+            unresolved.append(field_name)
+
+    if unresolved:
+        _grounding_log.warning(
+            "grounding: resolved %d/%d fields (lookup size %d); unresolved: %s",
+            len(grounding),
+            len(extraction_metadata),
+            len(chunk_lookup),
+            ", ".join(sorted(unresolved)),
+        )
+    else:
+        _grounding_log.info(
+            "grounding: resolved %d/%d fields", len(grounding), len(extraction_metadata)
+        )
 
     return grounding or None
 
@@ -952,22 +1000,42 @@ def _compute_document_hash(
     return None
 
 
-def _markdown_cache_key(prefix: str, doc_hash: str) -> str:
-    """Build S3 object key for the cached markdown."""
+def _effective_parse_model(parse_model: Optional[str]) -> str:
+    """The model that will actually parse — same resolution as _async_parse_document."""
+    return parse_model or os.getenv("LANDING_PARSE_MODEL", "dpt-2-latest")
+
+
+def _model_slug(parse_model: Optional[str]) -> str:
+    """Filesystem/S3-safe slug of the effective parse model (T8.7 cache keying)."""
+    effective = _effective_parse_model(parse_model)
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", effective)
+
+
+def _markdown_cache_key(prefix: str, doc_hash: str, parse_model: Optional[str] = None) -> str:
+    """Build S3 object key for the cached markdown.
+
+    T8.7: the effective parse model is part of the key — markdown produced by
+    one model must never be served for another (a changed `parse_model` or env
+    default would otherwise reuse stale markdown/grounding forever). Old
+    model-less keys simply become misses and the cache self-heals.
+    """
     prefix = (prefix or "").strip("/")
-    return f"{prefix}/{doc_hash}.md" if prefix else f"{doc_hash}.md"
+    name = f"{_model_slug(parse_model)}/{doc_hash}.md"
+    return f"{prefix}/{name}" if prefix else name
 
 
-def _markdown_meta_key(prefix: str, doc_hash: str) -> str:
+def _markdown_meta_key(prefix: str, doc_hash: str, parse_model: Optional[str] = None) -> str:
     """Build S3 object key for the cache metadata JSON."""
     prefix = (prefix or "").strip("/")
-    return f"{prefix}/{doc_hash}.meta.json" if prefix else f"{doc_hash}.meta.json"
+    name = f"{_model_slug(parse_model)}/{doc_hash}.meta.json"
+    return f"{prefix}/{name}" if prefix else name
 
 
-def _parse_json_cache_key(prefix: str, doc_hash: str) -> str:
-    """Build S3 object key for the cached parse.json."""
+def _parse_json_cache_key(prefix: str, doc_hash: str, parse_model: Optional[str] = None) -> str:
+    """Build S3 object key for the cached parse.json (model-scoped — T8.7)."""
     prefix = (prefix or "").strip("/")
-    return f"{prefix}/{doc_hash}.parse.json" if prefix else f"{doc_hash}.parse.json"
+    name = f"{_model_slug(parse_model)}/{doc_hash}.parse.json"
+    return f"{prefix}/{name}" if prefix else name
 
 
 def _resolve_cache_config(
@@ -1110,28 +1178,38 @@ async def _parse_with_cache(
     """
     doc_hash = _compute_document_hash(file_path, pdf_bytes)
     cache_key = (
-        _markdown_cache_key(cache_prefix, doc_hash) if (cache_enabled and doc_hash) else None
+        _markdown_cache_key(cache_prefix, doc_hash, parse_model)
+        if (cache_enabled and doc_hash)
+        else None
     )
 
     # --- Try cache hit ---
     parse_json_key = (
-        _parse_json_cache_key(cache_prefix, doc_hash) if (cache_enabled and doc_hash) else None
+        _parse_json_cache_key(cache_prefix, doc_hash, parse_model)
+        if (cache_enabled and doc_hash)
+        else None
     )
     if cache_enabled and s3_client and cache_bucket and cache_key:
         cached = await _try_load_markdown_from_s3(s3_client, cache_bucket, cache_key)
         if cached:
-            _cache_log.info("Cache HIT for %s (hash=%s)", file_name, doc_hash[:12])
             cached_parse = (
                 await _try_load_parse_json_from_s3(s3_client, cache_bucket, parse_json_key)
                 if parse_json_key
                 else None
             )
-            parse_response = cached_parse or {
-                "cache_hit": True,
-                "cache_bucket": cache_bucket,
-                "cache_key": cache_key,
-            }
-            return cached, parse_response
+            if cached_parse:
+                _cache_log.info("Cache HIT for %s (hash=%s)", file_name, doc_hash[:12])
+                return cached, cached_parse
+            # Markdown without parse.json (pre-parse.json cache entry or a
+            # failed save): a chunk-less response would silently lose ALL
+            # grounding (T6.14) — treat as a MISS so the fresh parse below
+            # re-populates both objects (self-healing).
+            _cache_log.warning(
+                "Cache hit for %s (hash=%s) has no parse.json — re-parsing to "
+                "preserve grounding",
+                file_name,
+                doc_hash[:12],
+            )
 
     # --- Parse normally ---
     print(f"  Parsing: {file_name}")

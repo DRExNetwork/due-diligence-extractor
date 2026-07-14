@@ -1822,6 +1822,10 @@ async def _extract_targeted_fields(
 ) -> list:
     """Run field extraction for single or multiple files."""
     if len(resolved.file_paths) == 1:
+        # markdown_cache: the batch variant below has cached since day one; the
+        # single-file path (every bill OCR call) did not — so each replace/
+        # sweep re-OCR paid a full Landing parse. Safe to enable now that a
+        # markdown-only cache entry re-parses instead of losing grounding.
         result = await extract_specific_fields_async(
             file=resolved.file_paths[0],
             document_type=document_type,
@@ -1830,6 +1834,8 @@ async def _extract_targeted_fields(
             parse_model=req.config.parse_model,
             extract_model=req.config.extract_model,
             rate_limit=req.config.rate_limit,
+            markdown_cache=True,
+            markdown_cache_bucket=req.bucket,
         )
         return [result]
 
@@ -1842,6 +1848,7 @@ async def _extract_targeted_fields(
         extract_model=req.config.extract_model,
         max_concurrent=len(resolved.file_paths),
         rate_limit=req.config.rate_limit,
+        markdown_cache_bucket=req.bucket,
     )
 
 
