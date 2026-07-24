@@ -1,0 +1,25 @@
+{
+  "_comment": "Layout fixture — CNEL BTCGSD01 (BT Comercial Sin Demanda), NON-SOLAR layout: ONE single energy row ('Energía activa total' carries the Monto), no demand rows, no 'Factor de multiplicación', no 'Valor Demanda'. Documented anchors from the 2026-07-10 example bill (plan §4.3/§6): Valor Consumo = 111,50 (comma-decimal bill) and the ~0.102 USD/kWh effective rate. consumo_total (1093.0), valor_total, account/barcode and dates are SYNTHESIZED consistently with those anchors — replace wholesale with the frozen capture output when the real net-metered BTCGSD01 sample arrives (T6.11 hard gate). Printed comma decimals are represented as JSON numbers, matching ADE's numeric coercion.",
+  "detail_rows": [
+    {
+      "descripcion": "Energía activa total",
+      "consumo_total": 1093.0,
+      "unidad_medida": "kWh",
+      "monto": 111.5
+    }
+  ],
+  "contract_account": "201005784222",
+  "barcode_text": "K201005784222",
+  "company_name": "ECUADOR-BRANDS S.A.",
+  "ruc": "0990000000001",
+  "service_address": "RCTO. SAN NICOLAS - LA BARRANCA / SAMBORONDON - SAMBORONDON",
+  "tariff_raw": "BTCGSD01 - BT Comercial",
+  "issue_date": "28-02-2026",
+  "billing_period_from": "27-01-2026",
+  "billing_period_to": "23-02-2026",
+  "days_billed": 28,
+  "multiplication_factor": null,
+  "valor_total": 135.4,
+  "valor_consumo": 111.5,
+  "valor_demanda": null
+}

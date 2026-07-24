@@ -25,6 +25,7 @@ def create_request() -> TeaserNarrativeGenerationRequest:
                     "id": 104,
                     "name": "gye01",
                     "location": "-2.0979133,-79.9416678,15",
+                    "description": "Industrial solar project designed to reduce energy cost exposure for the offtaker.",
                 },
                 "metrics": {
                     "totalDcCapacityKw": 1500,
@@ -83,19 +84,18 @@ def create_request() -> TeaserNarrativeGenerationRequest:
     )
 
 
-def test_teaser_prompt_payload_marks_financial_content_as_forbidden_in_overview() -> None:
+def test_teaser_prompt_payload_marks_financial_content_as_forbidden_in_overview_intro() -> None:
     payload = _build_teaser_narrative_user_payload(create_request())
 
-    overview_guidance = payload["section_guidance"]["overview"]
+    overview_guidance = payload["field_guidance"]["overview_intro"]
 
-    assert "CAPEX amounts" in overview_guidance["forbidden_topics"]
-    assert "DSCR" in overview_guidance["forbidden_topics"]
-    assert (
-        "raw regulatory framework codes or document IDs such as ARCERNNR"
-        in overview_guidance["forbidden_topics"]
-    )
-    assert payload["hard_rules"]["keep_overview_non_financial"] is True
-    assert payload["hard_rules"]["overview_forbids_raw_regulatory_detail"] is True
+    assert payload["schema_version"] == "teaser_render_content_v2"
+    assert "teaser_data.project.description as context" in overview_guidance["allowed_topics"]
+    assert "CAPEX detail" in overview_guidance["forbidden_topics"]
+    assert "DSCR detail" in overview_guidance["forbidden_topics"]
+    assert payload["hard_rules"]["use_project_description_when_present"] is True
+    assert payload["hard_rules"]["return_render_ready_content_fields"] is True
+    assert "overview_intro" in payload["field_budgets"]
 
 
 def test_teaser_overview_boundary_validator_rejects_financial_and_raw_regulatory_detail() -> None:
@@ -103,10 +103,13 @@ def test_teaser_overview_boundary_validator_rejects_financial_and_raw_regulatory
         _validate_teaser_narrative_section_boundaries(
             create_request(),
             {
-                "overview": (
-                    "El proyecto presenta un CAPEX de 883,701 USD, un DSCR de 1.2 y el marco "
-                    "ARCERNNR-005/24 con fecha 31/12/2024."
-                )
+                "content": {
+                    "overview_intro": (
+                        "El proyecto presenta un CAPEX de 883,701 USD, un DSCR de 1.2 y el marco "
+                        "ARCERNNR-005/24 con fecha 31/12/2024."
+                    ),
+                    "overview_closing": "",
+                }
             },
         )
 
@@ -119,10 +122,12 @@ def test_teaser_fallback_overview_stays_non_financial_even_if_investment_angle_m
         "budget failure",
     )
 
-    assert "883701" not in result.overview
-    assert "819000" not in result.overview
-    assert "441850.5" not in result.overview
-    assert "1.2" not in result.overview
-    assert "5 years" not in result.overview
-    assert "defined commercial assumptions" not in result.overview
-    assert "documented technical configuration" in result.overview
+    assert "883701" not in result.content.overview_intro
+    assert "819000" not in result.content.overview_intro
+    assert "441850.5" not in result.content.overview_intro
+    assert "1.2" not in result.content.overview_intro
+    assert "5 years" not in result.content.overview_intro
+    assert "defined commercial assumptions" not in result.content.overview_intro
+    assert "descripción del proyecto" in result.content.overview_intro
+    assert result.content.financial_intro
+    assert result.content.conclusion

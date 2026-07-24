@@ -1,0 +1,26 @@
+{
+  "_comment": "Pre-solar BTCGCD01 (BT Comercial con Demanda) — CANDYPLANET S.A., jun-2025 (docs/billis sample 1). Demanda facturable ($53.12) and reactiva rows MUST be excluded. Expected operands: 369.56 / 4017.00 (NOT 452.10 VALOR TOTAL, NOT 445.05, NOT 424.09).",
+  "contract_account": "200016919595",
+  "barcode_text": "K200016919595",
+  "company_name": "CANDYPLANET S.A.",
+  "ruc": "0992275979001",
+  "service_address": "VIA A DAULE KM 11.5 BLOQ#C-BOD#12 / C.C.CALIFORNIA II PB / TARQUI - GUAYAQUIL",
+  "tariff_raw": "BTCGCD01 - BT Comercial con Demanda",
+  "issue_date": "27-06-2025",
+  "billing_period_from": "27-05-2025",
+  "billing_period_to": "25-06-2025",
+  "days_billed": 30,
+  "multiplication_factor": null,
+  "valor_total": 452.10,
+  "valor_consumo": 369.56,
+  "valor_demanda": 53.12,
+  "detail_rows": [
+    {"descripcion": "Energía activa total", "consumo_total": 4017.00, "unidad_medida": "KWH", "monto": 369.56},
+    {"descripcion": "Energía reactiva total", "consumo_total": 429.00, "unidad_medida": "KVR", "monto": 0.00},
+    {"descripcion": "Demanda máx. total", "consumo_total": 13.10, "unidad_medida": "KW", "monto": 0.00},
+    {"descripcion": "Demanda facturable", "consumo_total": 13.10, "unidad_medida": "KW", "monto": 53.12}
+  ],
+  "total_kwh": null,
+  "total_amount_usd": null,
+  "tariff_code": null
+}

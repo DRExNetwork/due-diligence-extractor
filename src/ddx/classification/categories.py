@@ -19,6 +19,10 @@ from ddx.classification.cnel_energy_bill import (
     CnelEnergyBillData,
     normalize_cnel_energy_bill,
 )
+from ddx.classification.cnel_presolar_bill import (
+    CnelPresolarBillData,
+    normalize_cnel_presolar_bill,
+)
 
 # =============================================================================
 # Top-Level Categories (Level 1)
@@ -112,6 +116,14 @@ class DocumentType(str, Enum):
     # bulk-ingest classification prompts (build_classification_schema_for_category),
     # and this type must never become a Data Room classification candidate.
     CNEL_ENERGY_BILL = "CNEL Energy Bill"
+
+    # Admin IET Console (Epic PD-236 / PD-312, V1-2033 — NOT Data Room).
+    # The value slugs to "cnel_presolar_bill" — the document_type the NestJS
+    # admin console sends to POST /api/v1/extract/validate for the one-time
+    # pre-solar tariff extraction. Do not rename. Same deliberate absence from
+    # DOCUMENT_TYPE_TO_TOP_LEVEL as CNEL_ENERGY_BILL (never a classification
+    # candidate).
+    CNEL_PRESOLAR_BILL = "CNEL Presolar Bill"
 
     # Uncategorized
     UNCATEGORIZED = "Uncategorized Document"
@@ -1139,6 +1151,12 @@ def normalize_extracted_document(
         # Capture-and-reduce: derive BillFacts from the verbatim detail_rows
         # (per-tariff reducer, invariants, grounding provenance — fails closed).
         return normalize_cnel_energy_bill(extracted, extraction_metadata)
+
+    if doc_type_value == DocumentType.CNEL_PRESOLAR_BILL.value:
+        # Admin IET Console: derive the two IET operands (Σ energía-activa
+        # Monto / Σ energía-activa kWh) from the verbatim detail_rows — all
+        # four CNEL codes enabled, fails closed, NestJS does the division.
+        return normalize_cnel_presolar_bill(extracted, extraction_metadata)
 
     return extracted, extraction_metadata
 
@@ -2541,6 +2559,8 @@ PYDANTIC_MODELS: dict[DocumentType, Type[BaseModel]] = {
     DocumentType.INVERTER_BLOOMBERG_EVIDENCE: BloombergEvidenceData,
     # Energy Monitoring — Financial module (extract/validate only; see the enum note)
     DocumentType.CNEL_ENERGY_BILL: CnelEnergyBillData,
+    # Admin IET Console — pre-solar bills (extract/validate only; see the enum note)
+    DocumentType.CNEL_PRESOLAR_BILL: CnelPresolarBillData,
 }
 
 # Add Technical + Uncategorized schemas from landing_ai_poc_sdk2

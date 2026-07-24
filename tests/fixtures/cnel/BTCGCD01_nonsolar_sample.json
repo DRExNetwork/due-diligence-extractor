@@ -1,0 +1,43 @@
+{
+  "_comment": "Layout fixture — CNEL BTCGCD01 (BT Comercial Con Demanda), NON-SOLAR layout: 'Energía activa total' carries the Monto; reactive + demand rows present; no 'Factor de multiplicación' (BT). Documented anchors from the 2026-07-10 example bill (CANDYPLANET, the dot-decimal bill — plan §4.3/§4.3c/§6): Valor Consumo = 369.56, Valor Demanda = 53.12, activa consumo 4017.00 kWh (369.56 ÷ 4017.00 = the §6-documented 0.092 USD/kWh rate). Reactive/demand consumo values, valor_total, account/barcode and dates are SYNTHESIZED consistently — replace wholesale with the frozen capture output when the real net-metered BTCGCD01 sample arrives (T6.11 hard gate).",
+  "detail_rows": [
+    {
+      "descripcion": "Energía activa total",
+      "consumo_total": 4017.0,
+      "unidad_medida": "kWh",
+      "monto": 369.56
+    },
+    {
+      "descripcion": "Energía reactiva total",
+      "consumo_total": 1206.0,
+      "unidad_medida": "kVarh",
+      "monto": null
+    },
+    {
+      "descripcion": "Demanda máx. total",
+      "consumo_total": 18.4,
+      "unidad_medida": "kW",
+      "monto": null
+    },
+    {
+      "descripcion": "Demanda facturable",
+      "consumo_total": 18.4,
+      "unidad_medida": "kW",
+      "monto": 53.12
+    }
+  ],
+  "contract_account": "201001232366",
+  "barcode_text": "K201001232366",
+  "company_name": "CANDYPLANET S.A.",
+  "ruc": "0990000000002",
+  "service_address": "AV. JUAN TANCA MARENGO KM 2.5 / GUAYAQUIL",
+  "tariff_raw": "BTCGCD01 - BT Comercial con Demanda",
+  "issue_date": "28-02-2026",
+  "billing_period_from": "27-01-2026",
+  "billing_period_to": "23-02-2026",
+  "days_billed": 28,
+  "multiplication_factor": null,
+  "valor_total": 495.0,
+  "valor_consumo": 369.56,
+  "valor_demanda": 53.12
+}

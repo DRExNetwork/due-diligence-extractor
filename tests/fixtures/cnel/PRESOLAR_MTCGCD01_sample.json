@@ -1,0 +1,26 @@
+{
+  "_comment": "Pre-solar MTCGCD01 (MT Comercial con Demanda) — CORPORACIÓN EL ROSADO S.A., feb-2026 (docs/billis sample 3). Comma decimals + multiplication factor. Expected operands: 6624.29 / 53856.00.",
+  "contract_account": "200016615425",
+  "barcode_text": "K200016615425",
+  "company_name": "CORPORACION EL ROSADO S.A.",
+  "ruc": "0990004196001",
+  "service_address": "VIA A DAULE KM.11 MI COMISARIATO / C.CALIFORNIA II PB / XIMENA - GUAYAQUIL",
+  "tariff_raw": "MTCGCD01 - MT Comercial con Demanda",
+  "issue_date": "28-02-2026",
+  "billing_period_from": "27-01-2026",
+  "billing_period_to": "23-02-2026",
+  "days_billed": 28,
+  "multiplication_factor": "160,00",
+  "valor_total": "7376,17",
+  "valor_consumo": "6624,29",
+  "valor_demanda": "542,25",
+  "detail_rows": [
+    {"descripcion": "Energía activa total", "consumo_total": "53856,00", "unidad_medida": "kWh", "monto": "6624,29"},
+    {"descripcion": "Energía reactiva total", "consumo_total": "17760,00", "unidad_medida": "kVarh", "monto": null},
+    {"descripcion": "Demanda máx. total", "consumo_total": "132,80", "unidad_medida": "kW", "monto": null},
+    {"descripcion": "Demanda facturable", "consumo_total": "135,46", "unidad_medida": "kW", "monto": "542,25"}
+  ],
+  "total_kwh": null,
+  "total_amount_usd": null,
+  "tariff_code": null
+}

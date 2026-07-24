@@ -1,0 +1,30 @@
+{
+  "_comment": "Pre-solar MTCGCD02 (MT Comercial con Demanda Horaria) — C.C. California II locales, mar-2025 (docs/billis sample 4, annotated). Time-of-use BANDS: operands = sums across the three Energía act. hor. rows. Expected: 1937.18 / 21909.60. Demanda facturable (302,15) and per-band demand rows excluded.",
+  "contract_account": "201255302000",
+  "barcode_text": "K201255302000",
+  "company_name": "C.C. CALIFORNIA II LOCALES 1-2-3-19-20",
+  "ruc": "1790855948001",
+  "service_address": "VIA A DAULE-BLQ#K KM 11 LOC#1-2-3-19-20 / C.C.CALIFORNIA II PB / XIMENA - GUAYAQUIL",
+  "tariff_raw": "MTCGCD02 - MT Comercial con Demanda Horaria",
+  "issue_date": "27-03-2025",
+  "billing_period_from": "23-02-2025",
+  "billing_period_to": "25-03-2025",
+  "days_billed": 31,
+  "multiplication_factor": "40,00",
+  "valor_total": "2333,48",
+  "valor_consumo": "1937,18",
+  "valor_demanda": "302,15",
+  "detail_rows": [
+    {"descripcion": "Energía act. hor. A (08h00-18h00)", "consumo_total": "17340,00", "unidad_medida": "kWh", "monto": "1560,60"},
+    {"descripcion": "Energía act. hor. B (18h00-22h00)", "consumo_total": "2529,60", "unidad_medida": "kWh", "monto": "227,66"},
+    {"descripcion": "Energía act. hor. C (22h00-08h00)", "consumo_total": "2040,00", "unidad_medida": "kWh", "monto": "148,92"},
+    {"descripcion": "Energía reactiva total", "consumo_total": "2400,00", "unidad_medida": "kVarh", "monto": null},
+    {"descripcion": "Demanda máx. hor. A (08h00-18h00)", "consumo_total": "2,00", "unidad_medida": "kW", "monto": null},
+    {"descripcion": "Demanda máx. hor. B (18h00-22h00)", "consumo_total": "1,85", "unidad_medida": "kW", "monto": null},
+    {"descripcion": "Demanda máx. hor. C (22h00-08h00)", "consumo_total": "0,87", "unidad_medida": "kW", "monto": null},
+    {"descripcion": "Demanda facturable", "consumo_total": "81,60", "unidad_medida": "kW", "monto": "302,15"}
+  ],
+  "total_kwh": null,
+  "total_amount_usd": null,
+  "tariff_code": null
+}

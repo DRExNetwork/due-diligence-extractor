@@ -1,0 +1,60 @@
+{
+  "_comment": "Golden fixture — CNEL MTCGCD01, NET-METERED (solar) layout. Source: live Landing.ai run on the clean text-layer PDF (CC Marzo 2026, 2026-07-10), adapted to the capture schema: tariff_raw replaces the drifted tariff_code, valor_consumo/valor_demanda read from the bill's 'Servicio Eléctrico y Alumbrado Público' box. Derived fields are null — the LLM leaves them for the reducer.",
+  "detail_rows": [
+    {
+      "descripcion": "Energía activa total",
+      "consumo_total": 168000,
+      "unidad_medida": "KWH",
+      "monto": 0
+    },
+    {
+      "descripcion": "Energia Inyectada a la red",
+      "consumo_total": 5600,
+      "unidad_medida": "KWH",
+      "monto": 0
+    },
+    {
+      "descripcion": "Energia facturable",
+      "consumo_total": 162400,
+      "unidad_medida": "KWH",
+      "monto": 19975.2
+    },
+    {
+      "descripcion": "Energía reactiva total",
+      "consumo_total": 0,
+      "unidad_medida": "KVR",
+      "monto": 0
+    },
+    {
+      "descripcion": "Demanda máx. total",
+      "consumo_total": 476,
+      "unidad_medida": "KW",
+      "monto": 0
+    },
+    {
+      "descripcion": "Demanda facturable",
+      "consumo_total": 476,
+      "unidad_medida": "KW",
+      "monto": 2280.04
+    }
+  ],
+  "contract_account": "200047515305",
+  "barcode_text": "K200047515305",
+  "company_name": "CLUB DEPORTIVO BASICO GUAYAQUIL COUNTRY CLUB",
+  "ruc": "0990086680001",
+  "service_address": "RCTO. SAN NICOLAS - LA BARRANCA / SAMBORONDÓN - SAMBORONDÓN",
+  "tariff_raw": "MTCGCD01 - MT Comercial con Demanda",
+  "issue_date": "04-04-2026",
+  "billing_period_from": "02-03-2026",
+  "billing_period_to": "01-04-2026",
+  "days_billed": 31,
+  "multiplication_factor": 2800,
+  "valor_total": 24092.06,
+  "valor_consumo": 19975.2,
+  "valor_demanda": 2280.04,
+  "total_active_energy_kwh": null,
+  "solar_kwh": null,
+  "grid_kwh": null,
+  "billable_amount_usd": null,
+  "tariff_code": null
+}
