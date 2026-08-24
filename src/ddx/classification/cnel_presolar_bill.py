@@ -6,10 +6,11 @@ PD-312 / V1-2033 ST-03).
 
 The one-time extraction that feeds the Initial Energy Tariff registry:
 ``IET = total_amount_usd ÷ total_kwh``, where BOTH operands come from the
-'Energía activa' rows ONLY (= the bill's 'Valor Consumo'). USER-CONFIRMED
-2026-07-22: "we only care about what is paid for energía activa total" —
-Demanda facturable, reactiva, comercialización, alumbrado público, IVA and
-VALOR TOTAL are all EXCLUDED. The division itself happens in NestJS (TA2.5);
+'Energía activa' detail rows ONLY. USER-CONFIRMED 2026-07-22: "we only care
+about what is paid for energía activa total" — Demanda facturable, reactiva,
+comercialización, alumbrado público, IVA, Valor Consumo and VALOR TOTAL are
+all EXCLUDED. Summary boxes remain capture-only evidence and never block a
+valid detail-row reduction. The division itself happens in NestJS (TA2.5);
 this module only produces faithful operands + band detail rows.
 
 Clones the ``cnel_energy_bill`` capture-and-reduce architecture and REUSES its
@@ -41,7 +42,6 @@ from typing import Any, Dict, List, Optional, Tuple
 from pydantic import BaseModel, ConfigDict, Field
 
 from ddx.classification.cnel_energy_bill import (
-    MONEY_TOLERANCE_USD,
     RATE_BAND_MAX,
     RATE_BAND_MIN,
     BillDetailRow,
@@ -49,7 +49,6 @@ from ddx.classification.cnel_energy_bill import (
     _reattach_tariff_grounding,
     _sum_over,
     _synthesize_grounding,
-    _to_float,
     parse_tariff_code,
 )
 
@@ -152,7 +151,7 @@ class CnelPresolarBillData(BaseModel):
         json_schema_extra={"x-alternativeNames": ["Factor de multiplicación", "Multiplier"]},
     )
 
-    # ---- money boxes (independent cross-check sources) ----
+    # ---- money boxes (captured for evidence only; never reducer inputs) ----
     valor_total: Optional[float] = Field(
         default=None,
         description=(
@@ -215,8 +214,8 @@ def reduce_presolar_rows(
     'Energía activa total' row on standard tariffs; the three 'Energía act.
     hor. A/B/C' bands on MTCGCD02 — ``_bucket_rows`` matches both shapes, so
     the band sum is the same code path). ``total_kwh`` = Σ Consumo Total of
-    the same rows. Everything else (demanda, reactiva) is excluded by
-    construction. A non-empty ``violations`` list means REFUSE.
+    the same rows. Everything else (demanda, reactiva and summary-box values)
+    is excluded by construction. A non-empty ``violations`` list means REFUSE.
     """
     buckets = _bucket_rows(rows)
     violations: List[str] = []
@@ -250,27 +249,6 @@ def reduce_presolar_rows(
             "no energy payment found (sum of 'Energía activa' Montos <= 0) — "
             "on a net-metered bill the Monto lives on 'Energía facturable' rows, "
             "which this pre-solar pipeline deliberately does not read"
-        )
-
-    valor_consumo = _to_float(extracted.get("valor_consumo"))
-    if valor_consumo is not None and abs(total_amount - valor_consumo) > MONEY_TOLERANCE_USD:
-        violations.append(
-            f"sum of energy Montos {total_amount:.2f} != Valor Consumo {valor_consumo:.2f}"
-        )
-
-    valor_demanda = _to_float(extracted.get("valor_demanda"))
-    if valor_demanda is not None and buckets["demanda_facturable"]:
-        demanda_monto = _sum_over(rows, buckets["demanda_facturable"], "monto")
-        if abs(demanda_monto - valor_demanda) > MONEY_TOLERANCE_USD:
-            violations.append(
-                f"sum of Demanda facturable Montos {demanda_monto:.2f} != "
-                f"Valor Demanda {valor_demanda:.2f}"
-            )
-
-    valor_total = _to_float(extracted.get("valor_total"))
-    if valor_total is not None and total_amount > valor_total + MONEY_TOLERANCE_USD:
-        violations.append(
-            f"energy amount {total_amount:.2f} exceeds VALOR TOTAL {valor_total:.2f}"
         )
 
     if total_kwh > 0 and total_amount > 0:

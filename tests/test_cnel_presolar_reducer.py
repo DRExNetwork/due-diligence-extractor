@@ -1,11 +1,11 @@
 """Admin IET Console — pre-solar capture tests (V1-2033 ST-03 / TA1.x).
 
 Locks the sample-derived extraction rules (feature doc §5 step 2 +
-admin-iet-tasks.md Stage A1): operands come from the 'Energía activa' rows
-ONLY (= Valor Consumo; user-confirmed 2026-07-22 — demand/reactiva/APG/IVA
-excluded), MTCGCD02 sums its three time bands, comma decimals parse, the
-monthly pipeline's MTCGCD01-only gate stays untouched, and every refusal path
-leaves the operands null (fail closed).
+admin-iet-tasks.md Stage A1): operands come from the 'Energía activa' detail
+rows ONLY (demand/reactiva/APG/IVA and summary boxes excluded), MTCGCD02 sums
+its three time bands, comma decimals parse, the monthly pipeline's
+MTCGCD01-only gate stays untouched, and every refusal path leaves the operands
+null (fail closed).
 """
 
 from __future__ import annotations
@@ -128,21 +128,23 @@ def test_net_metering_rows_warn_as_wrong_document_and_refuse(caplog):
     assert any("POST-solar" in message for message in caplog.messages)
 
 
-def test_valor_consumo_cross_check_refuses_on_mismatch():
-    payload = load_fixture("PRESOLAR_BTCGCD01_sample.json")
-    payload["valor_consumo"] = 999.99
+def test_summary_box_mismatches_do_not_block_detail_row_operands():
+    """Detail rows remain authoritative when summary values are unusable."""
+    payload = load_fixture("PRESOLAR_MTCGCD02_sample.json")
+    payload["valor_consumo"] = 0
+    payload["valor_demanda"] = 0
+    payload["valor_total"] = -3.62
 
     extracted, _ = normalize_cnel_presolar_bill(payload, None)
 
-    assert extracted["total_amount_usd"] is None
-    assert extracted["total_kwh"] is None
+    assert extracted["total_amount_usd"] == 1937.18
+    assert extracted["total_kwh"] == 21909.60
 
 
 def test_implausible_rate_refuses_scale_errors():
     """A decimal-separator mis-parse (111.50 for 1.09 kWh → 102 USD/kWh) refuses."""
     payload = load_fixture("PRESOLAR_BTCGSD01_sample.json")
     payload["detail_rows"][0]["consumo_total"] = "1,09"
-    payload["valor_consumo"] = None  # isolate the rate-band check
 
     extracted, _ = normalize_cnel_presolar_bill(payload, None)
 
