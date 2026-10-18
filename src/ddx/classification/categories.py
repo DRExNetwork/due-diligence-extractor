@@ -32,6 +32,31 @@ YesNoAnswer = Literal["Sí", "No"]
 YES_NO_RESPONSE_INSTRUCTION = (
     "Return exactly one of: Sí, No. " "Do not return true/false or any other variant."
 )
+# V1-2273: values a model may return for `document_status`. The extractor lifts this
+# field out of the extracted data and returns it beside it, so it is never stored as
+# a data-room variable; the projects service uses it to rank sources when two files
+# describe the same row (e.g. the same fiscal year).
+DOCUMENT_STATUS_VALUES = ("audited", "amended", "final", "report", "summary", "draft")
+
+
+def _document_status_field() -> Any:
+    return Field(
+        default=None,
+        description=(
+            "What kind of source this document is. Return exactly one of: "
+            "'audited' (audited statements that include an independent auditor's report), "
+            "'amended' (a substitute, corrected or re-issued version of an earlier document, "
+            "e.g. 'sustitutiva', 'corregida', 'rectificativa'), "
+            "'final' (a final, signed or official version), "
+            "'report' (a regular report, filing, certificate or declaration), "
+            "'summary' (a summary, ratios or metrics sheet that does not contain the full "
+            "statements or tables), "
+            "'draft' (marked as draft or preliminary). "
+            "Return null if it cannot be determined from the document."
+        ),
+    )
+
+
 SOURCE_LANGUAGE_RESPONSE_INSTRUCTION = (
     "Return the response in the language indicated by document_language. "
     "If document_language is Spanish, answer entirely in Spanish. "
@@ -291,6 +316,8 @@ class ShareholderStructure(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    document_status: Optional[str] = _document_status_field()
+
     number_of_shareholders: int = Field(
         description="Total number of shareholders listed in the declaration"
     )
@@ -469,6 +496,8 @@ class EnergyConsumptionBillsCollection(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    document_status: Optional[str] = _document_status_field()
 
     # -------------------------------------------------------------------------
     # Monthly Consumption Data (array; one entry = one uploaded monthly bill)
@@ -827,6 +856,8 @@ class FinancialStatementsData(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    document_status: Optional[str] = _document_status_field()
+
     # -------------------------------------------------------------------------
     # Metadata
     # -------------------------------------------------------------------------
@@ -1183,6 +1214,8 @@ class IncomeTaxFilingsData(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    document_status: Optional[str] = _document_status_field()
+
     company_name: Optional[str] = Field(
         default=None, description="Company name as stated in the tax filings"
     )
@@ -1255,6 +1288,8 @@ class CashFlowStatementsData(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    document_status: Optional[str] = _document_status_field()
 
     company_name: Optional[str] = Field(
         default=None, description="Company name as stated in the cash flow statements"
@@ -1418,6 +1453,8 @@ class ProjectAcceptanceCertificatesData(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    document_status: Optional[str] = _document_status_field()
 
     # -------------------------------------------------------------------------
     # Company Information
@@ -1710,6 +1747,8 @@ class QAQCCommissioningData(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    document_status: Optional[str] = _document_status_field()
 
     document_language: Optional[DocumentLanguageAnswer] = Field(
         default=None,
@@ -2120,6 +2159,8 @@ class LiensCertificateData(BaseModel):
     """Schema for Liens Certificate (Section 2.8)."""
 
     model_config = ConfigDict(extra="forbid")
+
+    document_status: Optional[str] = _document_status_field()
 
     existing_mortgages: Optional[List[ExistingMortgageEntry]] = Field(
         default=None,

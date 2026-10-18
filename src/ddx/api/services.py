@@ -1745,6 +1745,7 @@ def _assemble_targeted_response(
                 credit_usage=meta["credit_usage"],
                 duration_ms=meta["duration_ms"],
                 job_id=meta["job_id"],
+                document_status=r.document_status,
             )
         )
 
@@ -2103,6 +2104,7 @@ def _convert_document_results(
                 credit_usage=meta["credit_usage"],
                 duration_ms=meta["duration_ms"],
                 job_id=meta["job_id"],
+                document_status=r.document_status,
             )
         )
     return bulk_results
