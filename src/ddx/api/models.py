@@ -167,6 +167,13 @@ class BulkDocumentResult(BaseModel):
         None, description="Extraction API processing duration in milliseconds"
     )
     job_id: Optional[str] = Field(None, description="Extraction API job identifier")
+    document_status: Optional[str] = Field(
+        None,
+        description=(
+            "V1-2273: kind of source (audited / amended / final / report / summary / draft); "
+            "used by the projects service to rank files that describe the same row."
+        ),
+    )
 
 
 class BulkIngestionResponse(BaseModel):
@@ -265,6 +272,13 @@ class TargetedDocumentResult(BaseModel):
         None, description="Extraction API processing duration in milliseconds"
     )
     job_id: Optional[str] = Field(None, description="Extraction API job identifier")
+    document_status: Optional[str] = Field(
+        None,
+        description=(
+            "V1-2273: kind of source (audited / amended / final / report / summary / draft); "
+            "used by the projects service to rank files that describe the same row."
+        ),
+    )
 
 
 class TargetedCompletionResponse(BaseModel):

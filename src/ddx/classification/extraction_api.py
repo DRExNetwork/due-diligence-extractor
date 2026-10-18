@@ -33,12 +33,15 @@ from ddx.classification.categories import (
     DocumentType,
     ClassificationResult,
     PYDANTIC_MODELS,
+    DOCUMENT_STATUS_VALUES,
     DOCUMENT_TYPE_DESCRIPTIONS,
     DOCUMENT_TYPE_TO_TOP_LEVEL,
     normalize_extracted_document,
 )
 from ddx.classification.landing_ai_poc_sdk import (
     build_classification_schema_for_category,
+    is_additive_list_field,
+    is_combined_list_field,
     should_disable_cross_document_validation,
 )
 from dotenv import load_dotenv
@@ -165,6 +168,9 @@ class DocumentResult(BaseModel):
     field_grounding: Optional[Dict[str, Any]] = None
     markdown_content: Optional[str] = None
     api_metadata: Optional[str] = None  # API response metadata (e.g., credit_usage, token count)
+    # V1-2273: what kind of source this file is (audited / amended / final / report /
+    # summary / draft). Returned beside the data, never as an extracted field.
+    document_status: Optional[str] = None
     success: bool = True
     error: Optional[str] = None
 
@@ -595,7 +601,11 @@ def _parse_field_meta(field_meta: Any, fallback_value: Any) -> Tuple[str, List, 
 
 
 def _build_candidate(
-    result: DocumentResult, _field_name: str, value: Any, field_meta: Any
+    result: DocumentResult,
+    _field_name: str,
+    value: Any,
+    field_meta: Any,
+    upload_order: int = 0,
 ) -> FieldCandidate:
     """Build a FieldCandidate from a result and its field metadata."""
     extracted_text, references, confidence = _parse_field_meta(field_meta, value)
@@ -607,11 +617,13 @@ def _build_candidate(
         confidence=confidence,
         chunk_ids=references,
         evidence_locations=[],
+        document_status=result.document_status,
+        upload_order=upload_order,
     )
 
 
 def _collect_candidates_from_result(
-    result: DocumentResult, doc_type: str
+    result: DocumentResult, doc_type: str, upload_order: int = 0
 ) -> Dict[str, FieldCandidate]:
     """Collect field candidates from a single result."""
     if not result.success or result.document_type != doc_type:
@@ -621,8 +633,13 @@ def _collect_candidates_from_result(
     for field_name, value in result.extracted_data.items():
         if value is None:
             continue
+        # V1-2273: list fields are never resolved by picking one file's list.
+        if is_additive_list_field(field_name) or is_combined_list_field(field_name):
+            continue
         field_meta = extraction_meta.get(field_name, {})
-        candidates[field_name] = _build_candidate(result, field_name, value, field_meta)
+        candidates[field_name] = _build_candidate(
+            result, field_name, value, field_meta, upload_order
+        )
     return candidates
 
 
@@ -664,8 +681,9 @@ def _collect_conflicts_from_results(
     field_candidates: Dict[str, List[FieldCandidate]] = {}
     source_files: List[str] = []
 
-    for result in results:
-        per_result = _collect_candidates_from_result(result, doc_type)
+    # Request order is upload order (the projects service sends files oldest first).
+    for upload_order, result in enumerate(results):
+        per_result = _collect_candidates_from_result(result, doc_type, upload_order)
         if not per_result:
             continue
         source_files.append(result.file_path or result.file_name)
@@ -722,6 +740,7 @@ def _build_field_from_validation(
         justification=validation.justification,
         alternatives=validation.alternative_values,
         flags=validation.flags,
+        provider_fallback=validation.provider_fallback,
     )
 
 
@@ -753,6 +772,54 @@ def _build_field_first_value(
     return None
 
 
+def _combined_list_item_key(item: Any) -> str:
+    """Normalised identity of a list item, used to de-duplicate combined lists."""
+    if isinstance(item, str):
+        return " ".join(item.split()).lower()
+    return json.dumps(item, sort_keys=True, default=str, ensure_ascii=False)
+
+
+def _build_field_combined_list(
+    field_name: str,
+    results: List[DocumentResult],
+) -> Optional[ValidatedFieldOutput]:
+    """V1-2273: combine a list field across every source file, keeping first-seen order."""
+    combined: List[Any] = []
+    seen: set = set()
+    contributing: List[DocumentResult] = []
+    for r in results:
+        if not r.success:
+            continue
+        val = r.extracted_data.get(field_name)
+        if not isinstance(val, list) or not val:
+            continue
+        contributing.append(r)
+        for item in val:
+            key = _combined_list_item_key(item)
+            if key in seen:
+                continue
+            seen.add(key)
+            combined.append(item)
+    if not contributing:
+        return None
+    first = contributing[0]
+    return ValidatedFieldOutput(
+        field_name=field_name,
+        value=combined,
+        source_file=first.file_path or first.file_name,
+        source_filename=first.file_name,
+        extracted_text=", ".join(str(item) for item in combined),
+        locations=[],
+        confidence_score=1.0,
+        justification=(
+            f"Combined list from {len(contributing)} source file(s): "
+            + ", ".join(r.file_name for r in contributing)
+        ),
+        alternatives=[],
+        flags=[],
+    )
+
+
 def _build_validated_output(
     results: List[DocumentResult],
     doc_type: str,
@@ -778,6 +845,15 @@ def _build_validated_output(
 
     validated_fields: Dict[str, ValidatedFieldOutput] = {}
     for field_name in sorted(all_fields):
+        # V1-2273: additive list fields stay per source file (no validated entry, so
+        # the projects service keeps every file's items).
+        if is_additive_list_field(field_name):
+            continue
+        if is_combined_list_field(field_name):
+            field_output = _build_field_combined_list(field_name, results)
+            if field_output:
+                validated_fields[field_name] = field_output
+            continue
         if field_name in validated_fields_lookup:
             validated_fields[field_name] = _build_field_from_validation(
                 field_name, validated_fields_lookup[field_name], results
@@ -1349,6 +1425,14 @@ async def _async_classify_from_markdown(
     return doc_type, raw
 
 
+def _normalize_document_status(value: Any) -> Optional[str]:
+    """Map a model-returned document status onto DOCUMENT_STATUS_VALUES (else None)."""
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    return normalized if normalized in DOCUMENT_STATUS_VALUES else None
+
+
 async def _async_extract_fields(
     client,
     markdown_content: str,
@@ -1406,6 +1490,12 @@ async def _async_extract_fields(
     except Exception as e:
         print(f"  ⚠️  Validation warning: {e}")
         extracted = extraction
+
+    # V1-2273: `document_status` describes the source, not the data — lift it out so
+    # it is returned beside the extracted fields instead of becoming a variable.
+    raw["document_status"] = _normalize_document_status(extracted.pop("document_status", None))
+    if isinstance(raw.get("extraction_metadata"), dict):
+        raw["extraction_metadata"].pop("document_status", None)
 
     extracted, normalized_metadata = normalize_extracted_document(
         doc_type,
@@ -1513,6 +1603,7 @@ async def _process_single_document(
             field_grounding=grounding,
             markdown_content=markdown_content if save_markdown else None,
             api_metadata=str(api_meta) if api_meta else None,
+            document_status=extract_raw.get("document_status"),
             success=True,
         )
 
@@ -2279,6 +2370,7 @@ async def extract_document_direct_async(
             extraction_metadata=ext_meta,
             field_grounding=grounding,
             api_metadata=str(api_meta) if api_meta else None,
+            document_status=extract_raw.get("document_status"),
             success=True,
         )
 
