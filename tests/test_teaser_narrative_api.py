@@ -25,6 +25,7 @@ def create_request_payload() -> dict:
                 "id": 44,
                 "name": "Parque Solar Norte",
                 "location": "Quito, Ecuador",
+                "description": "Solar project supporting industrial energy demand in Ecuador.",
             },
             "metrics": {
                 "totalDcCapacityKw": 1200,
@@ -89,12 +90,19 @@ def test_generate_teaser_narrative_endpoint_success(client: TestClient):
         project_name="Parque Solar Norte",
         language="en",
         model_version="gpt-test",
-        overview="overview text " * 10,
-        financial="financial text " * 8,
-        technical="technical text " * 8,
-        regulatory="regulatory text " * 6,
-        esg="esg text " * 7,
-        conclusion="conclusion text " * 7,
+        content={
+            "overview_intro": "overview intro text " * 10,
+            "overview_closing": "overview closing text " * 5,
+            "financial_intro": "financial intro text " * 5,
+            "financial_body": "financial body text " * 8,
+            "financial_closing": "financial closing text " * 5,
+            "technical_intro": "technical intro text " * 8,
+            "technical_closing": "technical closing text " * 5,
+            "regulatory_intro": "regulatory intro text " * 6,
+            "regulatory_closing": "regulatory closing text " * 4,
+            "esg_intro": "esg intro text " * 7,
+            "conclusion": "conclusion text " * 7,
+        },
         quality_checks={"within_budget": True},
         generation_mode="llm",
     )
@@ -112,8 +120,9 @@ def test_generate_teaser_narrative_endpoint_success(client: TestClient):
     data = response.json()
     assert data["project_id"] == "44"
     assert data["generation_mode"] == "llm"
-    assert "overview" in data
-    assert "financial" in data
+    assert "content" in data
+    assert data["content"]["overview_intro"].startswith("overview intro")
+    assert "overview" not in data
 
 
 def test_generate_teaser_narrative_endpoint_maps_value_error_to_bad_request(

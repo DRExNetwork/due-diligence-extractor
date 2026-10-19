@@ -19,6 +19,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import tempfile
 from datetime import datetime, timezone
 from io import BytesIO
@@ -32,12 +33,15 @@ from ddx.classification.categories import (
     DocumentType,
     ClassificationResult,
     PYDANTIC_MODELS,
+    DOCUMENT_STATUS_VALUES,
     DOCUMENT_TYPE_DESCRIPTIONS,
     DOCUMENT_TYPE_TO_TOP_LEVEL,
     normalize_extracted_document,
 )
 from ddx.classification.landing_ai_poc_sdk import (
     build_classification_schema_for_category,
+    is_additive_list_field,
+    is_combined_list_field,
     should_disable_cross_document_validation,
 )
 from dotenv import load_dotenv
@@ -163,6 +167,10 @@ class DocumentResult(BaseModel):
     extraction_metadata: Optional[Dict[str, Any]] = None
     field_grounding: Optional[Dict[str, Any]] = None
     markdown_content: Optional[str] = None
+    api_metadata: Optional[str] = None  # API response metadata (e.g., credit_usage, token count)
+    # V1-2273: what kind of source this file is (audited / amended / final / report /
+    # summary / draft). Returned beside the data, never as an extracted field.
+    document_status: Optional[str] = None
     success: bool = True
     error: Optional[str] = None
 
@@ -208,6 +216,7 @@ class FieldExtractionResult(BaseModel):
     extracted_fields: Dict[str, Any]
     extraction_metadata: Optional[Dict[str, Any]] = None
     field_grounding: Optional[Dict[str, Any]] = None
+    api_metadata: Optional[str] = None  # API response metadata (e.g., credit_usage, token count)
     success: bool = True
     error: Optional[str] = None
 
@@ -215,6 +224,8 @@ class FieldExtractionResult(BaseModel):
 # =============================================================================
 # Grounding Resolver — maps extraction_metadata references → page locations
 # =============================================================================
+
+_grounding_log = logging.getLogger("ddx.grounding")
 
 
 def _build_chunk_lookup(parse_response: Any) -> Dict[str, dict]:
@@ -343,11 +354,17 @@ def _resolve_references_to_locations(
         for grounding in chunk_grounding:
             if not isinstance(grounding, dict):
                 continue
+            box = grounding.get("box")
+            if not isinstance(box, dict) or not box:
+                # A location without a box cannot render a highlight — consumers
+                # (NestJS normalizeGrounding) drop it anyway. Skip it here so the
+                # resolution summary counts honestly (T6.14).
+                continue
             locations.append(
                 {
                     "chunk_id": ref_key,
                     "page": grounding.get("page", 0),
-                    "bounding_box": grounding.get("box", {}),
+                    "bounding_box": box,
                     "chunk_type": chunk.get("chunk_type") or chunk.get("type"),
                 }
             )
@@ -377,7 +394,18 @@ def _resolve_meta_entry(
                 )
             return combined
 
-        return [_resolve_meta_dict(item, chunk_lookup) for item in meta if isinstance(item, dict)]
+        # T8.9: drop per-row dicts in which no cell resolved — otherwise
+        # detail_rows ships [{}, {}, …], which is truthy and over-reports the
+        # "resolved X/Y fields" summary.
+        resolved_rows = [
+            resolved
+            for item in meta
+            if isinstance(item, dict)
+            for resolved in [_resolve_meta_dict(item, chunk_lookup)]
+            if resolved
+        ]
+
+        return resolved_rows or None
     return None
 
 
@@ -385,11 +413,15 @@ def _resolve_meta_dict(
     item: Dict[str, Any],
     chunk_lookup: Dict[str, dict],
 ) -> Dict[str, Any]:
-    """Resolve all sub-fields within a single array element dict."""
+    """Resolve all sub-fields within a single array element dict.
+
+    T8.9: sub-fields whose references matched nothing (empty list) are pruned —
+    an empty cell entry renders no highlight and must not count as resolved.
+    """
     resolved: Dict[str, Any] = {}
     for sub_field, sub_meta in item.items():
         entry = _resolve_meta_entry(sub_meta, chunk_lookup)
-        if entry is not None:
+        if entry:
             resolved[sub_field] = entry
     return resolved
 
@@ -411,13 +443,37 @@ def _resolve_field_grounding(
 
     chunk_lookup = _build_chunk_lookup(parse_response)
     if not chunk_lookup:
+        # Silent-empty grounding was a live debugging sink (T6.14) — say why.
+        _grounding_log.warning(
+            "grounding: chunk lookup is EMPTY (parse response without chunks/"
+            "grounding map) — 0/%d fields resolved",
+            len(extraction_metadata),
+        )
         return None
 
     grounding: Dict[str, Any] = {}
+    unresolved: List[str] = []
     for field_name, meta in extraction_metadata.items():
         entry = _resolve_meta_entry(meta, chunk_lookup)
-        if entry is not None:
+        if entry:
             grounding[field_name] = entry
+        else:
+            # None (no references) and [] (references that matched nothing or
+            # only box-less locations) both mean: no highlight possible.
+            unresolved.append(field_name)
+
+    if unresolved:
+        _grounding_log.warning(
+            "grounding: resolved %d/%d fields (lookup size %d); unresolved: %s",
+            len(grounding),
+            len(extraction_metadata),
+            len(chunk_lookup),
+            ", ".join(sorted(unresolved)),
+        )
+    else:
+        _grounding_log.info(
+            "grounding: resolved %d/%d fields", len(grounding), len(extraction_metadata)
+        )
 
     return grounding or None
 
@@ -545,7 +601,11 @@ def _parse_field_meta(field_meta: Any, fallback_value: Any) -> Tuple[str, List, 
 
 
 def _build_candidate(
-    result: DocumentResult, _field_name: str, value: Any, field_meta: Any
+    result: DocumentResult,
+    _field_name: str,
+    value: Any,
+    field_meta: Any,
+    upload_order: int = 0,
 ) -> FieldCandidate:
     """Build a FieldCandidate from a result and its field metadata."""
     extracted_text, references, confidence = _parse_field_meta(field_meta, value)
@@ -557,11 +617,13 @@ def _build_candidate(
         confidence=confidence,
         chunk_ids=references,
         evidence_locations=[],
+        document_status=result.document_status,
+        upload_order=upload_order,
     )
 
 
 def _collect_candidates_from_result(
-    result: DocumentResult, doc_type: str
+    result: DocumentResult, doc_type: str, upload_order: int = 0
 ) -> Dict[str, FieldCandidate]:
     """Collect field candidates from a single result."""
     if not result.success or result.document_type != doc_type:
@@ -571,8 +633,13 @@ def _collect_candidates_from_result(
     for field_name, value in result.extracted_data.items():
         if value is None:
             continue
+        # V1-2273: list fields are never resolved by picking one file's list.
+        if is_additive_list_field(field_name) or is_combined_list_field(field_name):
+            continue
         field_meta = extraction_meta.get(field_name, {})
-        candidates[field_name] = _build_candidate(result, field_name, value, field_meta)
+        candidates[field_name] = _build_candidate(
+            result, field_name, value, field_meta, upload_order
+        )
     return candidates
 
 
@@ -614,8 +681,9 @@ def _collect_conflicts_from_results(
     field_candidates: Dict[str, List[FieldCandidate]] = {}
     source_files: List[str] = []
 
-    for result in results:
-        per_result = _collect_candidates_from_result(result, doc_type)
+    # Request order is upload order (the projects service sends files oldest first).
+    for upload_order, result in enumerate(results):
+        per_result = _collect_candidates_from_result(result, doc_type, upload_order)
         if not per_result:
             continue
         source_files.append(result.file_path or result.file_name)
@@ -672,6 +740,7 @@ def _build_field_from_validation(
         justification=validation.justification,
         alternatives=validation.alternative_values,
         flags=validation.flags,
+        provider_fallback=validation.provider_fallback,
     )
 
 
@@ -703,6 +772,54 @@ def _build_field_first_value(
     return None
 
 
+def _combined_list_item_key(item: Any) -> str:
+    """Normalised identity of a list item, used to de-duplicate combined lists."""
+    if isinstance(item, str):
+        return " ".join(item.split()).lower()
+    return json.dumps(item, sort_keys=True, default=str, ensure_ascii=False)
+
+
+def _build_field_combined_list(
+    field_name: str,
+    results: List[DocumentResult],
+) -> Optional[ValidatedFieldOutput]:
+    """V1-2273: combine a list field across every source file, keeping first-seen order."""
+    combined: List[Any] = []
+    seen: set = set()
+    contributing: List[DocumentResult] = []
+    for r in results:
+        if not r.success:
+            continue
+        val = r.extracted_data.get(field_name)
+        if not isinstance(val, list) or not val:
+            continue
+        contributing.append(r)
+        for item in val:
+            key = _combined_list_item_key(item)
+            if key in seen:
+                continue
+            seen.add(key)
+            combined.append(item)
+    if not contributing:
+        return None
+    first = contributing[0]
+    return ValidatedFieldOutput(
+        field_name=field_name,
+        value=combined,
+        source_file=first.file_path or first.file_name,
+        source_filename=first.file_name,
+        extracted_text=", ".join(str(item) for item in combined),
+        locations=[],
+        confidence_score=1.0,
+        justification=(
+            f"Combined list from {len(contributing)} source file(s): "
+            + ", ".join(r.file_name for r in contributing)
+        ),
+        alternatives=[],
+        flags=[],
+    )
+
+
 def _build_validated_output(
     results: List[DocumentResult],
     doc_type: str,
@@ -728,6 +845,15 @@ def _build_validated_output(
 
     validated_fields: Dict[str, ValidatedFieldOutput] = {}
     for field_name in sorted(all_fields):
+        # V1-2273: additive list fields stay per source file (no validated entry, so
+        # the projects service keeps every file's items).
+        if is_additive_list_field(field_name):
+            continue
+        if is_combined_list_field(field_name):
+            field_output = _build_field_combined_list(field_name, results)
+            if field_output:
+                validated_fields[field_name] = field_output
+            continue
         if field_name in validated_fields_lookup:
             validated_fields[field_name] = _build_field_from_validation(
                 field_name, validated_fields_lookup[field_name], results
@@ -950,22 +1076,42 @@ def _compute_document_hash(
     return None
 
 
-def _markdown_cache_key(prefix: str, doc_hash: str) -> str:
-    """Build S3 object key for the cached markdown."""
+def _effective_parse_model(parse_model: Optional[str]) -> str:
+    """The model that will actually parse — same resolution as _async_parse_document."""
+    return parse_model or os.getenv("LANDING_PARSE_MODEL", "dpt-2-latest")
+
+
+def _model_slug(parse_model: Optional[str]) -> str:
+    """Filesystem/S3-safe slug of the effective parse model (T8.7 cache keying)."""
+    effective = _effective_parse_model(parse_model)
+    return re.sub(r"[^A-Za-z0-9._-]+", "_", effective)
+
+
+def _markdown_cache_key(prefix: str, doc_hash: str, parse_model: Optional[str] = None) -> str:
+    """Build S3 object key for the cached markdown.
+
+    T8.7: the effective parse model is part of the key — markdown produced by
+    one model must never be served for another (a changed `parse_model` or env
+    default would otherwise reuse stale markdown/grounding forever). Old
+    model-less keys simply become misses and the cache self-heals.
+    """
     prefix = (prefix or "").strip("/")
-    return f"{prefix}/{doc_hash}.md" if prefix else f"{doc_hash}.md"
+    name = f"{_model_slug(parse_model)}/{doc_hash}.md"
+    return f"{prefix}/{name}" if prefix else name
 
 
-def _markdown_meta_key(prefix: str, doc_hash: str) -> str:
+def _markdown_meta_key(prefix: str, doc_hash: str, parse_model: Optional[str] = None) -> str:
     """Build S3 object key for the cache metadata JSON."""
     prefix = (prefix or "").strip("/")
-    return f"{prefix}/{doc_hash}.meta.json" if prefix else f"{doc_hash}.meta.json"
+    name = f"{_model_slug(parse_model)}/{doc_hash}.meta.json"
+    return f"{prefix}/{name}" if prefix else name
 
 
-def _parse_json_cache_key(prefix: str, doc_hash: str) -> str:
-    """Build S3 object key for the cached parse.json."""
+def _parse_json_cache_key(prefix: str, doc_hash: str, parse_model: Optional[str] = None) -> str:
+    """Build S3 object key for the cached parse.json (model-scoped — T8.7)."""
     prefix = (prefix or "").strip("/")
-    return f"{prefix}/{doc_hash}.parse.json" if prefix else f"{doc_hash}.parse.json"
+    name = f"{_model_slug(parse_model)}/{doc_hash}.parse.json"
+    return f"{prefix}/{name}" if prefix else name
 
 
 def _resolve_cache_config(
@@ -1108,28 +1254,38 @@ async def _parse_with_cache(
     """
     doc_hash = _compute_document_hash(file_path, pdf_bytes)
     cache_key = (
-        _markdown_cache_key(cache_prefix, doc_hash) if (cache_enabled and doc_hash) else None
+        _markdown_cache_key(cache_prefix, doc_hash, parse_model)
+        if (cache_enabled and doc_hash)
+        else None
     )
 
     # --- Try cache hit ---
     parse_json_key = (
-        _parse_json_cache_key(cache_prefix, doc_hash) if (cache_enabled and doc_hash) else None
+        _parse_json_cache_key(cache_prefix, doc_hash, parse_model)
+        if (cache_enabled and doc_hash)
+        else None
     )
     if cache_enabled and s3_client and cache_bucket and cache_key:
         cached = await _try_load_markdown_from_s3(s3_client, cache_bucket, cache_key)
         if cached:
-            _cache_log.info("Cache HIT for %s (hash=%s)", file_name, doc_hash[:12])
             cached_parse = (
                 await _try_load_parse_json_from_s3(s3_client, cache_bucket, parse_json_key)
                 if parse_json_key
                 else None
             )
-            parse_response = cached_parse or {
-                "cache_hit": True,
-                "cache_bucket": cache_bucket,
-                "cache_key": cache_key,
-            }
-            return cached, parse_response
+            if cached_parse:
+                _cache_log.info("Cache HIT for %s (hash=%s)", file_name, doc_hash[:12])
+                return cached, cached_parse
+            # Markdown without parse.json (pre-parse.json cache entry or a
+            # failed save): a chunk-less response would silently lose ALL
+            # grounding (T6.14) — treat as a MISS so the fresh parse below
+            # re-populates both objects (self-healing).
+            _cache_log.warning(
+                "Cache hit for %s (hash=%s) has no parse.json — re-parsing to "
+                "preserve grounding",
+                file_name,
+                doc_hash[:12],
+            )
 
     # --- Parse normally ---
     print(f"  Parsing: {file_name}")
@@ -1212,6 +1368,7 @@ async def _async_extract(
     return {
         "extraction": getattr(response, "extraction", {}) or {},
         "extraction_metadata": getattr(response, "extraction_metadata", None),
+        "metadata": getattr(response, "metadata", None),
     }
 
 
@@ -1266,6 +1423,14 @@ async def _async_classify_from_markdown(
     raw["top_level_category"] = top_level_category.value
 
     return doc_type, raw
+
+
+def _normalize_document_status(value: Any) -> Optional[str]:
+    """Map a model-returned document status onto DOCUMENT_STATUS_VALUES (else None)."""
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().lower()
+    return normalized if normalized in DOCUMENT_STATUS_VALUES else None
 
 
 async def _async_extract_fields(
@@ -1325,6 +1490,12 @@ async def _async_extract_fields(
     except Exception as e:
         print(f"  ⚠️  Validation warning: {e}")
         extracted = extraction
+
+    # V1-2273: `document_status` describes the source, not the data — lift it out so
+    # it is returned beside the extracted fields instead of becoming a variable.
+    raw["document_status"] = _normalize_document_status(extracted.pop("document_status", None))
+    if isinstance(raw.get("extraction_metadata"), dict):
+        raw["extraction_metadata"].pop("document_status", None)
 
     extracted, normalized_metadata = normalize_extracted_document(
         doc_type,
@@ -1420,6 +1591,7 @@ async def _process_single_document(
         # Step 4: Resolve grounding locations from extraction references
         ext_meta = extract_raw.get("extraction_metadata")
         grounding = _resolve_field_grounding(ext_meta, parse_response)
+        api_meta = extract_raw.get("metadata")
 
         return DocumentResult(
             file_name=file_name,
@@ -1430,6 +1602,8 @@ async def _process_single_document(
             extraction_metadata=ext_meta,
             field_grounding=grounding,
             markdown_content=markdown_content if save_markdown else None,
+            api_metadata=str(api_meta) if api_meta else None,
+            document_status=extract_raw.get("document_status"),
             success=True,
         )
 
@@ -1955,6 +2129,7 @@ async def extract_specific_fields_async(
         _print_extracted_variables(file_name, extracted)
 
         grounding = _resolve_field_grounding(ext_meta, parse_response)
+        api_meta = raw.get("metadata")
 
         return FieldExtractionResult(
             file_name=file_name,
@@ -1964,6 +2139,7 @@ async def extract_specific_fields_async(
             extracted_fields=extracted,
             extraction_metadata=ext_meta,
             field_grounding=grounding,
+            api_metadata=str(api_meta) if api_meta else None,
             success=True,
         )
 
@@ -2183,6 +2359,7 @@ async def extract_document_direct_async(
 
         ext_meta = extract_raw.get("extraction_metadata")
         grounding = _resolve_field_grounding(ext_meta, parse_response)
+        api_meta = extract_raw.get("metadata")
 
         return DocumentResult(
             file_name=file_name,
@@ -2192,6 +2369,8 @@ async def extract_document_direct_async(
             extracted_data=extracted,
             extraction_metadata=ext_meta,
             field_grounding=grounding,
+            api_metadata=str(api_meta) if api_meta else None,
+            document_status=extract_raw.get("document_status"),
             success=True,
         )
 

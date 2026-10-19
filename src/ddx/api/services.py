@@ -147,6 +147,9 @@ _RESEARCH_FIELDS: List[str] = [
 _UNCATEGORIZED_DOCUMENT_TYPE = "Uncategorized Document"
 
 
+_UNCATEGORIZED_DOCUMENT_TYPE = "Uncategorized Document"
+
+
 def _is_equipment_sheets_document_type(document_type: Optional[str]) -> bool:
     if not document_type:
         return False
@@ -1445,7 +1448,9 @@ async def _process_all_categories(
     _fill_missing_files(best_per_file, req.s3_paths, path_mapping)
 
     resolved = ResolvedFiles(req.s3_paths, path_mapping)
-    processed = _convert_document_results(list(best_per_file.values()), resolved.s3_lookup)
+    processed = _convert_document_results(
+        list(best_per_file.values()), resolved.s3_lookup
+    )
     validated = _serialize_validated_results(all_validated)
 
     return processed, validated
@@ -1713,20 +1718,36 @@ def _assemble_targeted_response(
     research_source_filename: Optional[str] = None,
 ) -> TargetedCompletionResponse:
     """Convert extraction results into targeted response."""
-    individual = [
-        TargetedDocumentResult(
-            file_name=r.file_name,
-            s3_path=resolved.s3_lookup.get(r.file_name),
-            document_type=r.document_type,
-            top_level_category=r.top_level_category,
-            extracted_data=r.extracted_data,
-            extraction_metadata=r.extraction_metadata,
-            field_grounding=r.field_grounding,
-            success=r.success,
-            error=r.error,
+    individual = []
+    for r in results_list:
+        # Log extraction metrics for successful extractions
+        if r.success and r.api_metadata:
+            log.info(
+                "Extracted document | file=%s | doc_type=%s | metadata=%s",
+                r.file_name,
+                r.document_type,
+                r.api_metadata,
+            )
+
+        meta = _parse_api_metadata(r.api_metadata)
+        individual.append(
+            TargetedDocumentResult(
+                file_name=r.file_name,
+                s3_path=resolved.s3_lookup.get(r.file_name),
+                document_type=r.document_type,
+                top_level_category=r.top_level_category,
+                extracted_data=r.extracted_data,
+                extraction_metadata=r.extraction_metadata,
+                field_grounding=r.field_grounding,
+                success=r.success,
+                error=r.error,
+                api_metadata=r.api_metadata,
+                credit_usage=meta["credit_usage"],
+                duration_ms=meta["duration_ms"],
+                job_id=meta["job_id"],
+                document_status=r.document_status,
+            )
         )
-        for r in results_list
-    ]
 
     consolidated = _serialize_targeted_validated_result(validated_result)
     if consolidated and research_payload:
@@ -1802,6 +1823,10 @@ async def _extract_targeted_fields(
 ) -> list:
     """Run field extraction for single or multiple files."""
     if len(resolved.file_paths) == 1:
+        # markdown_cache: the batch variant below has cached since day one; the
+        # single-file path (every bill OCR call) did not — so each replace/
+        # sweep re-OCR paid a full Landing parse. Safe to enable now that a
+        # markdown-only cache entry re-parses instead of losing grounding.
         result = await extract_specific_fields_async(
             file=resolved.file_paths[0],
             document_type=document_type,
@@ -1810,6 +1835,8 @@ async def _extract_targeted_fields(
             parse_model=req.config.parse_model,
             extract_model=req.config.extract_model,
             rate_limit=req.config.rate_limit,
+            markdown_cache=True,
+            markdown_cache_bucket=req.bucket,
         )
         return [result]
 
@@ -1822,6 +1849,7 @@ async def _extract_targeted_fields(
         extract_model=req.config.extract_model,
         max_concurrent=len(resolved.file_paths),
         rate_limit=req.config.rate_limit,
+        markdown_cache_bucket=req.bucket,
     )
 
 
@@ -1834,11 +1862,14 @@ def _build_file_level_results(
     errors: List[DocumentProcessingError] = []
 
     for fr in field_results:
+        meta = _parse_api_metadata(getattr(fr, "api_metadata", None))
         detail: Dict[str, Any] = {
             "file_name": fr.file_name,
             "s3_path": s3_lookup.get(fr.file_name),
             "success": fr.success,
             "extracted_fields": fr.extracted_fields,
+            "api_metadata": getattr(fr, "api_metadata", None),
+            "credit_usage": meta["credit_usage"],
         }
         if fr.error:
             detail["error"] = fr.error
@@ -1851,12 +1882,15 @@ def _build_file_level_results(
             )
         details.append(detail)
 
-        if fr.success and fr.extracted_fields:
-            log.info(
-                "Validation extracted variables for file=%s: %s",
-                fr.file_name,
-                _truncate_for_log(fr.extracted_fields),
-            )
+        if fr.success:
+            if fr.api_metadata:
+                log.info("Extracted fields | file=%s | metadata=%s", fr.file_name, fr.api_metadata)
+            if fr.extracted_fields:
+                log.info(
+                    "Validation extracted variables for file=%s: %s",
+                    fr.file_name,
+                    _truncate_for_log(fr.extracted_fields),
+                )
 
     return details, errors
 
@@ -2000,6 +2034,7 @@ async def validation_correction(
                 _truncate_for_log(merged_values),
             )
         overall_status = _compute_overall_validation_status(extracted_fields, req.expected_values)
+        api_metadata, credit_usage = _aggregate_validation_credits(field_results)
 
         return ValidationCorrectionResponse(
             document_type=doc_type,
@@ -2009,6 +2044,8 @@ async def validation_correction(
             extracted_fields=extracted_fields,
             overall_validation_status=overall_status,
             file_results=file_details,
+            api_metadata=api_metadata,
+            credit_usage=credit_usage,
             errors=errors,
         )
 
@@ -2040,20 +2077,100 @@ def _convert_document_results(
     s3_path_lookup: Dict[str, str],
 ) -> List[BulkDocumentResult]:
     """Convert internal DocumentResult list to API BulkDocumentResult list."""
-    return [
-        BulkDocumentResult(
-            file_name=r.file_name,
-            s3_path=s3_path_lookup.get(r.file_name),
-            document_type=r.document_type,
-            top_level_category=r.top_level_category,
-            extracted_data=r.extracted_data,
-            extraction_metadata=r.extraction_metadata,
-            field_grounding=r.field_grounding,
-            success=r.success,
-            error=r.error,
+    bulk_results = []
+    for r in results:
+        # Log extraction metrics for successful extractions
+        if r.success:
+            log.info(
+                "Document extraction completed | file=%s | doc_type=%s | api_metadata=%s",
+                r.file_name,
+                r.document_type,
+                r.api_metadata,
+            )
+
+        meta = _parse_api_metadata(r.api_metadata)
+        bulk_results.append(
+            BulkDocumentResult(
+                file_name=r.file_name,
+                s3_path=s3_path_lookup.get(r.file_name),
+                document_type=r.document_type,
+                top_level_category=r.top_level_category,
+                extracted_data=r.extracted_data,
+                extraction_metadata=r.extraction_metadata,
+                field_grounding=r.field_grounding,
+                success=r.success,
+                error=r.error,
+                api_metadata=r.api_metadata,
+                credit_usage=meta["credit_usage"],
+                duration_ms=meta["duration_ms"],
+                job_id=meta["job_id"],
+                document_status=r.document_status,
+            )
         )
-        for r in results
-    ]
+    return bulk_results
+
+
+def _parse_api_metadata(metadata: Any) -> Dict[str, Any]:
+    """Parse credit_usage / duration_ms / job_id from a DocumentResult.api_metadata value.
+
+    api_metadata is stored as a ``str(...)`` repr of the extraction SDK Metadata
+    object (see extraction_api.py), so we parse it tolerantly whether it arrives
+    as that string repr or as an object exposing the attributes directly.
+    """
+    parsed: Dict[str, Any] = {
+        "credit_usage": None,
+        "duration_ms": None,
+        "job_id": None,
+    }
+    if not metadata:
+        return parsed
+
+    try:
+        if isinstance(metadata, str):
+            match = re.search(r"credit_usage=(\d+\.?\d*)", metadata)
+            parsed["credit_usage"] = float(match.group(1)) if match else None
+
+            match = re.search(r"duration_ms=(\d+)", metadata)
+            parsed["duration_ms"] = int(match.group(1)) if match else None
+
+            match = re.search(r"job_id='([^']+)'", metadata)
+            parsed["job_id"] = match.group(1) if match else None
+        else:
+            credit_usage = getattr(metadata, "credit_usage", None)
+            parsed["credit_usage"] = (
+                float(credit_usage) if credit_usage is not None else None
+            )
+            parsed["duration_ms"] = getattr(metadata, "duration_ms", None)
+            parsed["job_id"] = getattr(metadata, "job_id", None)
+    except (ValueError, TypeError) as e:
+        log.warning("Failed to parse api_metadata %r: %s", metadata, e)
+
+    return parsed
+
+
+def _aggregate_validation_credits(
+    field_results: list,
+) -> Tuple[Optional[str], Optional[float]]:
+    """Sum credit_usage across field-extraction results for the validate path.
+
+    Returns ``(api_metadata, credit_usage)`` where api_metadata is the raw repr
+    of the first processed file and credit_usage is the total across all files
+    (None when no file reported any credit usage).
+    """
+    first_metadata: Optional[str] = None
+    credit_total = 0.0
+    credit_seen = False
+
+    for fr in field_results:
+        metadata = getattr(fr, "api_metadata", None)
+        if metadata and first_metadata is None:
+            first_metadata = metadata
+        parsed = _parse_api_metadata(metadata)
+        if parsed["credit_usage"] is not None:
+            credit_total += parsed["credit_usage"]
+            credit_seen = True
+
+    return first_metadata, (credit_total if credit_seen else None)
 
 
 def _serialize_validated_results(

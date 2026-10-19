@@ -1,0 +1,23 @@
+{
+  "_comment": "Pre-solar BTCGSD01 (BT Comercial) — ECUADOR-BRANDS S.A., nov-2025 (docs/billis sample 2). Single Energía-activa row; COMMA DECIMALS as printed. Expected operands: 111.50 / 1090.00.",
+  "contract_account": "201005784222",
+  "barcode_text": "K201005784222",
+  "company_name": "ECUADOR-BRANDS S.A.",
+  "ruc": "0993041408001",
+  "service_address": "VIA DAULE KM. 10 100 PARQUE CALIFORNIA 2 BLOQ C BODEGA#64 / CALIFORNIA 2 / TARQUI - GUAYAQUIL",
+  "tariff_raw": "BTCGSD01 - BT Comercial",
+  "issue_date": "14-11-2025",
+  "billing_period_from": "14-10-2025",
+  "billing_period_to": "13-11-2025",
+  "days_billed": 31,
+  "multiplication_factor": null,
+  "valor_total": "125,77",
+  "valor_consumo": "111,50",
+  "valor_demanda": null,
+  "detail_rows": [
+    {"descripcion": "Energía activa total", "consumo_total": "1090,00", "unidad_medida": "kWh", "monto": "111,50"}
+  ],
+  "total_kwh": null,
+  "total_amount_usd": null,
+  "tariff_code": null
+}
