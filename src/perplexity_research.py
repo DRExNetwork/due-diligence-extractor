@@ -247,19 +247,23 @@ def research_certificates(
             brand_name=brand,
             current_year=CURRENT_YEAR,
         )
-        results = run_search(client, query, max_results=1)
+        results = run_search(client, query, max_results=3)
 
         cert_name = None
         source_url = ""
         validity_date = None
 
-        if results:
-            r = results[0]
-            cert_name = getattr(r, "title", None) or None
+        _generic = {"certificate", "pdf certificate", "certifiacte", "document", "datasheet"}
+
+        for r in results:
+            title = (getattr(r, "title", "") or "").strip()
+            if re.sub(r"\s+", " ", title).lower().strip("[]pdf ") in _generic:
+                continue
+            cert_name = title or None
             source_url = getattr(r, "url", "") or ""
-            # Parse validity date from snippet if available
             snippet = getattr(r, "snippet", "") or ""
             validity_date = extract_date_from_text(snippet)
+            break
 
         cert = CertificateEvidence(
             standard_code=std["code"],

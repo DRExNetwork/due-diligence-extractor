@@ -1,0 +1,48 @@
+{
+  "_comment": "Layout fixture — CNEL MTCGCD01, NON-SOLAR layout (no facturable/inyectada rows; the activa row carries the Monto). Source: example bill CORPORACION EL ROSADO (2026-02), supplied 2026-07-10 as a layout placeholder — the plant is not billing solar yet. Comma decimals on the printed bill (6624,29) are represented here as JSON numbers, matching ADE's numeric coercion.",
+  "detail_rows": [
+    {
+      "descripcion": "Energía activa total",
+      "consumo_total": 53856.0,
+      "unidad_medida": "kWh",
+      "monto": 6624.29
+    },
+    {
+      "descripcion": "Energía reactiva total",
+      "consumo_total": 17760.0,
+      "unidad_medida": "kVarh",
+      "monto": null
+    },
+    {
+      "descripcion": "Demanda máx. total",
+      "consumo_total": 132.8,
+      "unidad_medida": "kW",
+      "monto": null
+    },
+    {
+      "descripcion": "Demanda facturable",
+      "consumo_total": 135.46,
+      "unidad_medida": "kW",
+      "monto": 542.25
+    }
+  ],
+  "contract_account": "200016615425",
+  "barcode_text": "K200016615425",
+  "company_name": "CORPORACION EL ROSADO S.A.",
+  "ruc": "0990004196001",
+  "service_address": "VIA A DAULE KM.11 MI COMISARIATO / C.CALIFORNIA II PB / XIMENA - GUAYAQUIL",
+  "tariff_raw": "MTCGCD01 - MT Comercial con Demanda",
+  "issue_date": "28-02-2026",
+  "billing_period_from": "27-01-2026",
+  "billing_period_to": "23-02-2026",
+  "days_billed": 28,
+  "multiplication_factor": 160.0,
+  "valor_total": 7376.17,
+  "valor_consumo": 6624.29,
+  "valor_demanda": 542.25,
+  "total_active_energy_kwh": null,
+  "solar_kwh": null,
+  "grid_kwh": null,
+  "billable_amount_usd": null,
+  "tariff_code": null
+}

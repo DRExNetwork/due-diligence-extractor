@@ -15,14 +15,48 @@ from urllib.parse import quote
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from ddx.classification.cnel_energy_bill import (
+    CnelEnergyBillData,
+    normalize_cnel_energy_bill,
+)
+from ddx.classification.cnel_presolar_bill import (
+    CnelPresolarBillData,
+    normalize_cnel_presolar_bill,
+)
+
 # =============================================================================
 # Top-Level Categories (Level 1)
 # =============================================================================
 DocumentLanguageAnswer = Literal["Spanish", "English", "Other"]
-YesNoAnswer = Literal["Yes", "No"]
+YesNoAnswer = Literal["Sí", "No"]
 YES_NO_RESPONSE_INSTRUCTION = (
-    "Return exactly one of: Yes, No. " "Do not return true/false or any other variant."
+    "Return exactly one of: Sí, No. " "Do not return true/false or any other variant."
 )
+# V1-2273: values a model may return for `document_status`. The extractor lifts this
+# field out of the extracted data and returns it beside it, so it is never stored as
+# a data-room variable; the projects service uses it to rank sources when two files
+# describe the same row (e.g. the same fiscal year).
+DOCUMENT_STATUS_VALUES = ("audited", "amended", "final", "report", "summary", "draft")
+
+
+def _document_status_field() -> Any:
+    return Field(
+        default=None,
+        description=(
+            "What kind of source this document is. Return exactly one of: "
+            "'audited' (audited statements that include an independent auditor's report), "
+            "'amended' (a substitute, corrected or re-issued version of an earlier document, "
+            "e.g. 'sustitutiva', 'corregida', 'rectificativa'), "
+            "'final' (a final, signed or official version), "
+            "'report' (a regular report, filing, certificate or declaration), "
+            "'summary' (a summary, ratios or metrics sheet that does not contain the full "
+            "statements or tables), "
+            "'draft' (marked as draft or preliminary). "
+            "Return null if it cannot be determined from the document."
+        ),
+    )
+
+
 SOURCE_LANGUAGE_RESPONSE_INSTRUCTION = (
     "Return the response in the language indicated by document_language. "
     "If document_language is Spanish, answer entirely in Spanish. "
@@ -99,6 +133,22 @@ class DocumentType(str, Enum):
     # Permits Documents
     ELECTRICAL_UTILITY_FEASIBILITY_REPORT = "Electrical Utility Feasibility Report"
     LAND_USE_PERMIT = "Land Use Permit"
+
+    # Energy Monitoring — Financial module (Epic PD-236 / PD-269, NOT Data Room).
+    # The value slugs to "cnel_energy_bill" — the document_type the NestJS bill
+    # pipeline sends to POST /api/v1/extract/validate. Do not rename.
+    # Deliberately ABSENT from DOCUMENT_TYPE_TO_TOP_LEVEL: that registry feeds the
+    # bulk-ingest classification prompts (build_classification_schema_for_category),
+    # and this type must never become a Data Room classification candidate.
+    CNEL_ENERGY_BILL = "CNEL Energy Bill"
+
+    # Admin IET Console (Epic PD-236 / PD-312, V1-2033 — NOT Data Room).
+    # The value slugs to "cnel_presolar_bill" — the document_type the NestJS
+    # admin console sends to POST /api/v1/extract/validate for the one-time
+    # pre-solar tariff extraction. Do not rename. Same deliberate absence from
+    # DOCUMENT_TYPE_TO_TOP_LEVEL as CNEL_ENERGY_BILL (never a classification
+    # candidate).
+    CNEL_PRESOLAR_BILL = "CNEL Presolar Bill"
 
     # Uncategorized
     UNCATEGORIZED = "Uncategorized Document"
@@ -218,6 +268,8 @@ DOCUMENT_TYPE_DESCRIPTIONS: dict[DocumentType, str] = {
     DocumentType.LAND_USE_PERMIT: "Land use permit or zoning approval for the project site",
     # Permits
     DocumentType.ELECTRICAL_UTILITY_FEASIBILITY_REPORT: "Utility feasibility report from the electrical distribution company containing capacity requested, feasibility status, available hosting capacity, maximum permitted annual generation, regulatory framework, issue date, and validity period",
+    # Energy Monitoring — Financial module (never a Data Room classification candidate)
+    DocumentType.CNEL_ENERGY_BILL: "Monthly CNEL EP electricity bill for an SGDA subscriber (net-metered) — Energy Monitoring bill-upload pipeline (PD-269), extracted via extract/validate only",
     # Uncategorized
     DocumentType.UNCATEGORIZED: "Documents that do not fit into any of the predefined categories",
 }
@@ -263,6 +315,8 @@ class ShareholderStructure(BaseModel):
     """Schema for Shareholders Declaration (Section 1.2)."""
 
     model_config = ConfigDict(extra="forbid")
+
+    document_status: Optional[str] = _document_status_field()
 
     number_of_shareholders: int = Field(
         description="Total number of shareholders listed in the declaration"
@@ -366,7 +420,9 @@ class EnergyConsumptionBillsData(BaseModel):
     # -------------------------------------------------------------------------
     # Billing Period Identification
     # -------------------------------------------------------------------------
-    month: str = Field(description="Calendar month of the billing period as the full English month name (e.g., 'January', 'February'). Always return the month name, never a number.")
+    month: str = Field(
+        description="Calendar month of the billing period as the full English month name (e.g., 'January', 'February'). Always return the month name, never a number."
+    )
     year: Optional[int] = Field(
         default=None,
         description="Calendar year of the billing period (e.g., 2025)",
@@ -440,6 +496,8 @@ class EnergyConsumptionBillsCollection(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    document_status: Optional[str] = _document_status_field()
 
     # -------------------------------------------------------------------------
     # Monthly Consumption Data (array; one entry = one uploaded monthly bill)
@@ -798,6 +856,8 @@ class FinancialStatementsData(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    document_status: Optional[str] = _document_status_field()
+
     # -------------------------------------------------------------------------
     # Metadata
     # -------------------------------------------------------------------------
@@ -1118,6 +1178,17 @@ def normalize_extracted_document(
         )
         return normalized, extraction_metadata
 
+    if doc_type_value == DocumentType.CNEL_ENERGY_BILL.value:
+        # Capture-and-reduce: derive BillFacts from the verbatim detail_rows
+        # (per-tariff reducer, invariants, grounding provenance — fails closed).
+        return normalize_cnel_energy_bill(extracted, extraction_metadata)
+
+    if doc_type_value == DocumentType.CNEL_PRESOLAR_BILL.value:
+        # Admin IET Console: derive the two IET operands (Σ energía-activa
+        # Monto / Σ energía-activa kWh) from the verbatim detail_rows — all
+        # four CNEL codes enabled, fails closed, NestJS does the division.
+        return normalize_cnel_presolar_bill(extracted, extraction_metadata)
+
     return extracted, extraction_metadata
 
 
@@ -1142,6 +1213,8 @@ class IncomeTaxFilingsData(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    document_status: Optional[str] = _document_status_field()
 
     company_name: Optional[str] = Field(
         default=None, description="Company name as stated in the tax filings"
@@ -1215,6 +1288,8 @@ class CashFlowStatementsData(BaseModel):
     """
 
     model_config = ConfigDict(extra="forbid")
+
+    document_status: Optional[str] = _document_status_field()
 
     company_name: Optional[str] = Field(
         default=None, description="Company name as stated in the cash flow statements"
@@ -1379,6 +1454,8 @@ class ProjectAcceptanceCertificatesData(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    document_status: Optional[str] = _document_status_field()
+
     # -------------------------------------------------------------------------
     # Company Information
     # -------------------------------------------------------------------------
@@ -1525,7 +1602,7 @@ class ESHSESMSPoliciesData(BaseModel):
     ohs_procedures_summary: Optional[str] = Field(
         default=None,
         description=(
-            "Summary of Occupational Health and Safety procedures (max 4 lines). "
+            "Summary of Occupational Health and Safety procedures (max 2-3 lines). "
             "Key safety protocols and procedures. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
         ),
     )
@@ -1671,6 +1748,8 @@ class QAQCCommissioningData(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+    document_status: Optional[str] = _document_status_field()
+
     document_language: Optional[DocumentLanguageAnswer] = Field(
         default=None,
         description=(
@@ -1685,7 +1764,7 @@ class QAQCCommissioningData(BaseModel):
     visual_inspection_summary: Optional[str] = Field(
         default=None,
         description=(
-            "Summary of visual inspection findings. Overall condition assessment. "
+            "Summary of visual inspection findings. Overall condition assessment (max 2-3 lines). "
             + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
         ),
     )
@@ -1750,7 +1829,7 @@ class IndustrialSafetyPlanData(BaseModel):
     ifc_aligned_hr_practices_summary: Optional[str] = Field(
         default=None,
         description=(
-            "Summary of IFC-aligned HR practices described in the Industrial Safety Plan. "
+            "Summary of IFC-aligned HR practices described in the Industrial Safety Plan (max 2-3 lines). "
             + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
         ),
     )
@@ -1815,7 +1894,7 @@ class EnvironmentalLicenceEIAData(BaseModel):
     biodiversity_impacts_summary: Optional[str] = Field(
         default=None,
         description=(
-            "Biodiversity impacts summary in 2-4 lines. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+            "Biodiversity impacts summary in 2-3 lines. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
         ),
     )
 
@@ -1837,7 +1916,7 @@ class EnvironmentalLicenceEIAData(BaseModel):
     mitigation_measures_summary: Optional[str] = Field(
         default=None,
         description=(
-            "Mitigation measures summary in 2-4 lines. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+            "Mitigation measures summary in 2-3 lines. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
         ),
     )
 
@@ -1906,7 +1985,7 @@ class EnvironmentalLicenceEIAData(BaseModel):
     public_consultation_summary: Optional[str] = Field(
         default=None,
         description=(
-            "Public consultation summary in 2-4 lines. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+            "Public consultation summary in 2-3 lines. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
         ),
     )
 
@@ -2052,7 +2131,9 @@ class SiteLegalStatusSummaryData(BaseModel):
     )
     property_disputes_summary: Optional[str] = Field(
         default=None,
-        description=("Property disputes summary. " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION),
+        description=(
+            "Property disputes summary (max 2-3 lines). " + SOURCE_LANGUAGE_RESPONSE_INSTRUCTION
+        ),
     )
     expropriation_risk_identified: Optional[YesNoAnswer] = Field(
         default=None,
@@ -2078,6 +2159,8 @@ class LiensCertificateData(BaseModel):
     """Schema for Liens Certificate (Section 2.8)."""
 
     model_config = ConfigDict(extra="forbid")
+
+    document_status: Optional[str] = _document_status_field()
 
     existing_mortgages: Optional[List[ExistingMortgageEntry]] = Field(
         default=None,
@@ -2515,6 +2598,10 @@ PYDANTIC_MODELS: dict[DocumentType, Type[BaseModel]] = {
     DocumentType.INVERTER_IEC_CERTIFICATE: IECCertificateEvidenceData,
     DocumentType.MODULE_BLOOMBERG_EVIDENCE: BloombergEvidenceData,
     DocumentType.INVERTER_BLOOMBERG_EVIDENCE: BloombergEvidenceData,
+    # Energy Monitoring — Financial module (extract/validate only; see the enum note)
+    DocumentType.CNEL_ENERGY_BILL: CnelEnergyBillData,
+    # Admin IET Console — pre-solar bills (extract/validate only; see the enum note)
+    DocumentType.CNEL_PRESOLAR_BILL: CnelPresolarBillData,
 }
 
 # Add Technical + Uncategorized schemas from landing_ai_poc_sdk2

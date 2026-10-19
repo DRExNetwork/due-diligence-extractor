@@ -37,6 +37,8 @@ src/out_sdk
 src/out_new
 src/out_validation
 *.json
+# …but keep committed test fixtures (golden extraction outputs)
+!tests/fixtures/**/*.json
 *.png
 *.csv
 *.xlsx

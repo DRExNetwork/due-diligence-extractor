@@ -156,6 +156,24 @@ class BulkDocumentResult(BaseModel):
     )
     success: bool = True
     error: Optional[str] = None
+    api_metadata: Optional[str] = Field(
+        None,
+        description="Raw extraction API metadata repr (credit_usage, job_id, duration_ms, etc.)",
+    )
+    credit_usage: Optional[float] = Field(
+        None, description="Credits consumed by the extraction API for this document"
+    )
+    duration_ms: Optional[int] = Field(
+        None, description="Extraction API processing duration in milliseconds"
+    )
+    job_id: Optional[str] = Field(None, description="Extraction API job identifier")
+    document_status: Optional[str] = Field(
+        None,
+        description=(
+            "V1-2273: kind of source (audited / amended / final / report / summary / draft); "
+            "used by the projects service to rank files that describe the same row."
+        ),
+    )
 
 
 class BulkIngestionResponse(BaseModel):
@@ -243,6 +261,24 @@ class TargetedDocumentResult(BaseModel):
     )
     success: bool = True
     error: Optional[str] = None
+    api_metadata: Optional[str] = Field(
+        None,
+        description="Raw extraction API metadata repr (credit_usage, job_id, duration_ms, etc.)",
+    )
+    credit_usage: Optional[float] = Field(
+        None, description="Credits consumed by the extraction API for this document"
+    )
+    duration_ms: Optional[int] = Field(
+        None, description="Extraction API processing duration in milliseconds"
+    )
+    job_id: Optional[str] = Field(None, description="Extraction API job identifier")
+    document_status: Optional[str] = Field(
+        None,
+        description=(
+            "V1-2273: kind of source (audited / amended / final / report / summary / draft); "
+            "used by the projects service to rank files that describe the same row."
+        ),
+    )
 
 
 class TargetedCompletionResponse(BaseModel):
@@ -349,6 +385,14 @@ class ValidationCorrectionResponse(BaseModel):
     file_results: List[Dict[str, Any]] = Field(
         default_factory=list,
         description="Per-file extraction details when multiple files provided",
+    )
+    api_metadata: Optional[str] = Field(
+        None,
+        description="Raw extraction API metadata repr of the first processed file",
+    )
+    credit_usage: Optional[float] = Field(
+        None,
+        description="Total credits consumed by the extraction API across all files",
     )
     errors: List[DocumentProcessingError] = Field(default_factory=list)
 

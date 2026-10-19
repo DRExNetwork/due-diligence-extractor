@@ -63,6 +63,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import re
 from dataclasses import dataclass, field
@@ -71,6 +72,23 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from openai import OpenAI
 from pydantic import BaseModel, Field
+
+_validation_log = logging.getLogger("ddx.validation")
+
+# V1-2273: marker used for log-based alerting on AI-provider failures.
+AI_PROVIDER_FAILURE_MARKER = "AI_PROVIDER_FAILURE"
+# V1-2273: set when the AI could not choose and the ranked fallback rules chose instead.
+PROVIDER_FALLBACK_FLAG = "PROVIDER_FALLBACK"
+FALLBACK_CONFIDENCE = 0.5
+# Source rank used by the fallback (same order as the projects service): an amended
+# document supersedes the one it amends; unknown status counts as a regular report.
+_SOURCE_RANK = {"amended": 4, "audited": 3, "final": 3, "report": 2, "summary": 1, "draft": 1}
+_DEFAULT_SOURCE_RANK = _SOURCE_RANK["report"]
+# Retries for the OpenAI call (the SDK backs off exponentially on 429 / 5xx / connection errors).
+_DEFAULT_VALIDATION_MAX_RETRIES = 3
+_DEFAULT_VALIDATION_TIMEOUT_SECONDS = 60.0
+# Extra attempts when the model answers but the answer cannot be parsed.
+_PARSE_ATTEMPTS = 2
 
 # =============================================================================
 # Utility Functions
@@ -151,6 +169,10 @@ class FieldCandidate:
     confidence: Optional[float] = None  # If available from extraction metadata
     chunk_ids: List[str] = field(default_factory=list)  # Reference chunk IDs
     evidence_locations: List[EvidenceLocation] = field(default_factory=list)  # Coordinates/pages
+    # V1-2273: kind of source (audited / report / summary …) and position of the file in
+    # the request (higher = uploaded later); used only by the ranked fallback rules.
+    document_status: Optional[str] = None
+    upload_order: int = 0
 
 
 @dataclass
@@ -204,6 +226,13 @@ class ValidatedFieldOutput(BaseModel):
         default_factory=list,
         description="Any red flags or inconsistencies detected",
     )
+    provider_fallback: bool = Field(
+        default=False,
+        description=(
+            "V1-2273: True when the AI provider could not choose (error or unparseable "
+            "answer) and the value was chosen by the ranked fallback rules instead."
+        ),
+    )
 
 
 class ValidationResult(BaseModel):
@@ -228,6 +257,13 @@ class ValidationResult(BaseModel):
     flags: List[str] = Field(
         default_factory=list,
         description="Any red flags or inconsistencies detected",
+    )
+    provider_fallback: bool = Field(
+        default=False,
+        description=(
+            "V1-2273: True when the AI provider could not choose (error or unparseable "
+            "answer) and the value was chosen by the ranked fallback rules instead."
+        ),
     )
 
 
@@ -301,7 +337,109 @@ class ValidationLayer:
             raise RuntimeError("Missing OPENAI_API_KEY environment variable.")
 
         self.model = model
-        self.client = OpenAI(api_key=self.api_key, base_url=base_url)
+        self.client = OpenAI(
+            api_key=self.api_key,
+            base_url=base_url,
+            max_retries=int(
+                os.getenv("DDX_VALIDATION_MAX_RETRIES", _DEFAULT_VALIDATION_MAX_RETRIES)
+            ),
+            timeout=float(
+                os.getenv("DDX_VALIDATION_TIMEOUT_SECONDS", _DEFAULT_VALIDATION_TIMEOUT_SECONDS)
+            ),
+        )
+
+    @staticmethod
+    def _fallback_result(
+        conflict: FieldConflict,
+        reason: str,
+        flag: str,
+    ) -> ValidationResult:
+        """V1-2273: the AI could not choose — pick by ranked rules instead of "first file".
+
+        Rules, applied in order until one value is left:
+          1. the file with the higher source rank (amended > audited/final > report >
+             summary/draft);
+          2. a value the AI cited from the document over one with no citation;
+          3. the value most files agree on;
+          4. the most recently uploaded file.
+        """
+        pool = list(enumerate(conflict.candidates))
+        deciding_rule: Optional[str] = None
+
+        def keep(kept: list, rule: str) -> None:
+            nonlocal pool, deciding_rule
+            if kept and len(kept) < len(pool):
+                pool = kept
+                if len(pool) == 1:
+                    deciding_rule = rule
+
+        def rank(candidate: FieldCandidate) -> int:
+            return _SOURCE_RANK.get(
+                (candidate.document_status or "").strip().lower(), _DEFAULT_SOURCE_RANK
+            )
+
+        def value_key(entry) -> str:
+            return json.dumps(entry[1].value, sort_keys=True, default=str)
+
+        best_rank = max(rank(c) for _, c in pool)
+        keep([x for x in pool if rank(x[1]) == best_rank], "higher-ranked source document")
+
+        if len(pool) > 1:
+            keep([x for x in pool if x[1].chunk_ids], "value cited from the document")
+
+        if len(pool) > 1:
+            counts: Dict[str, int] = {}
+            for entry in pool:
+                counts[value_key(entry)] = counts.get(value_key(entry), 0) + 1
+            top = max(counts.values())
+            leaders = [k for k, n in counts.items() if n == top]
+            if len(leaders) == 1:
+                keep(
+                    [x for x in pool if value_key(x) == leaders[0]],
+                    f"value given by {top} of {len(conflict.candidates)} files",
+                )
+                if len(pool) > 1:  # every remaining file gives the same value
+                    deciding_rule = deciding_rule or (
+                        f"value given by {top} of {len(conflict.candidates)} files"
+                    )
+                    pool = pool[:1]
+
+        if len(pool) > 1:
+            pool = [max(pool, key=lambda x: (x[1].upload_order, x[0]))]
+            deciding_rule = "most recently uploaded file"
+
+        selected_index, selected = pool[0]
+        return ValidationResult(
+            field_name=conflict.field_name,
+            selected_value=selected.value,
+            selected_source=selected.source_file,
+            selected_source_filename=selected.source_filename,
+            locations=[
+                LocationInfo(
+                    page=loc.page,
+                    box=loc.box.to_dict() if loc.box else None,
+                    chunk_id=loc.chunk_id,
+                    image_path=loc.image_path,
+                )
+                for loc in selected.evidence_locations
+            ],
+            confidence_score=FALLBACK_CONFIDENCE,
+            justification=(
+                f"AI provider could not choose ({reason}); value chosen by rule: "
+                f"{deciding_rule} — {selected.source_filename}."
+            ),
+            alternative_values=[
+                {
+                    "value": c.value,
+                    "source_file": c.source_file,
+                    "source_filename": c.source_filename,
+                }
+                for i, c in enumerate(conflict.candidates)
+                if i != selected_index
+            ],
+            flags=[PROVIDER_FALLBACK_FLAG, flag],
+            provider_fallback=True,
+        )
 
     def _build_reasoning_prompt(self, conflict: FieldConflict) -> str:
         """Build the prompt for the reasoning model."""
@@ -386,9 +524,11 @@ Respond ONLY with the JSON object, no additional text."""
 
             result = json.loads(response_text.strip())
 
-            selected_idx = int(result.get("selected_index", 0))
+            if "selected_index" not in result:
+                raise KeyError("selected_index")
+            selected_idx = int(result["selected_index"])
             if selected_idx < 0 or selected_idx >= len(conflict.candidates):
-                selected_idx = 0
+                raise ValueError(f"selected_index {selected_idx} out of range")
 
             selected_candidate = conflict.candidates[selected_idx]
 
@@ -434,36 +574,12 @@ Respond ONLY with the JSON object, no additional text."""
                 flags=result.get("flags", []),
             )
 
-        except (json.JSONDecodeError, KeyError, ValueError) as e:
-            # Fallback: select first candidate with low confidence
-            first = conflict.candidates[0]
-            locations = [
-                LocationInfo(
-                    page=loc.page,
-                    box=loc.box.to_dict() if loc.box else None,
-                    chunk_id=loc.chunk_id,
-                    image_path=loc.image_path,
-                )
-                for loc in first.evidence_locations
-            ]
-
-            return ValidationResult(
-                field_name=conflict.field_name,
-                selected_value=first.value,
-                selected_source=first.source_file,
-                selected_source_filename=first.source_filename,
-                locations=locations,
-                confidence_score=0.3,
-                justification=f"Failed to parse model response: {e}. Defaulting to first candidate.",
-                alternative_values=[
-                    {
-                        "value": c.value,
-                        "source_file": c.source_file,
-                        "source_filename": c.source_filename,
-                    }
-                    for c in conflict.candidates[1:]
-                ],
-                flags=["PARSE_ERROR: Model response could not be parsed"],
+        except (json.JSONDecodeError, KeyError, ValueError, TypeError, AttributeError) as e:
+            # V1-2273: never "first candidate" — the ranked fallback rules choose.
+            return self._fallback_result(
+                conflict,
+                reason=f"unparseable answer: {type(e).__name__}: {e}",
+                flag=f"PARSE_ERROR: {type(e).__name__}: {e}",
             )
 
     def validate_field(self, conflict: FieldConflict) -> ValidationResult:
@@ -506,53 +622,57 @@ Respond ONLY with the JSON object, no additional text."""
 
         prompt = self._build_reasoning_prompt(conflict)
 
-        try:
-            response = self.client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are an expert at validating and reconciling data extracted from technical documents. Always respond with valid JSON.",
-                    },
-                    {"role": "user", "content": prompt},
-                ],
-            )
+        result: Optional[ValidationResult] = None
+        for attempt in range(1, _PARSE_ATTEMPTS + 1):
+            try:
+                # Transient provider errors are retried by the SDK (max_retries, backoff).
+                response = self.client.chat.completions.create(
+                    model=self.model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "You are an expert at validating and reconciling data extracted from technical documents. Always respond with valid JSON.",
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                )
+            except Exception as e:
+                # V1-2273: provider failure (e.g. 429 insufficient_quota) — no silent
+                # first-candidate fallback; ranked rules choose and an alertable line is logged.
+                _validation_log.error(
+                    "%s field=%s document_type=%s model=%s error=%s: %s",
+                    AI_PROVIDER_FAILURE_MARKER,
+                    conflict.field_name,
+                    conflict.document_type,
+                    self.model,
+                    type(e).__name__,
+                    e,
+                )
+                return self._fallback_result(
+                    conflict,
+                    reason=f"provider error: {type(e).__name__}: {e}",
+                    flag=f"API_ERROR: {type(e).__name__}: {e}",
+                )
 
             response_text = response.choices[0].message.content or ""
-            return self._parse_reasoning_response(response_text, conflict)
-
-        except Exception as e:
-            # On API error, return first candidate with error flag
-            print(f"  API Error: {e}")
-            first = conflict.candidates[0]
-            locations = [
-                LocationInfo(
-                    page=loc.page,
-                    box=loc.box.to_dict() if loc.box else None,
-                    chunk_id=loc.chunk_id,
-                    image_path=loc.image_path,
-                )
-                for loc in first.evidence_locations
-            ]
-
-            return ValidationResult(
-                field_name=conflict.field_name,
-                selected_value=first.value,
-                selected_source=first.source_file,
-                selected_source_filename=first.source_filename,
-                locations=locations,
-                confidence_score=0.2,
-                justification=f"API error during validation: {e}. Defaulting to first candidate.",
-                alternative_values=[
-                    {
-                        "value": c.value,
-                        "source_file": c.source_file,
-                        "source_filename": c.source_filename,
-                    }
-                    for c in conflict.candidates[1:]
-                ],
-                flags=[f"API_ERROR: {type(e).__name__}: {e}"],
+            result = self._parse_reasoning_response(response_text, conflict)
+            if not result.provider_fallback:
+                return result
+            _validation_log.warning(
+                "Validation answer for field=%s could not be parsed (attempt %d/%d)",
+                conflict.field_name,
+                attempt,
+                _PARSE_ATTEMPTS,
             )
+        _validation_log.error(
+            "%s field=%s document_type=%s model=%s error=unparseable answer after %d attempts",
+            AI_PROVIDER_FAILURE_MARKER,
+            conflict.field_name,
+            conflict.document_type,
+            self.model,
+            _PARSE_ATTEMPTS,
+        )
+        return result
 
     def validate_all_conflicts(
         self,
@@ -590,6 +710,7 @@ Respond ONLY with the JSON object, no additional text."""
         high_confidence = sum(1 for v in validations if v.confidence_score >= 0.8)
         low_confidence = sum(1 for v in validations if v.confidence_score < 0.5)
         total_flags = sum(len(v.flags) for v in validations)
+        fallbacks = sum(1 for v in validations if v.provider_fallback)
 
         summary = (
             f"Validated {len(validations)} fields with conflicts from {len(source_files)} files. "
@@ -597,6 +718,9 @@ Respond ONLY with the JSON object, no additional text."""
             f"{low_confidence} low confidence selections. "
             f"{total_flags} total flags/warnings raised."
         )
+        if fallbacks:
+            summary += f" {fallbacks} field(s) chosen by fallback rules (AI provider unavailable)."
+
 
         return ValidationReport(
             top_level_category=top_level_category,

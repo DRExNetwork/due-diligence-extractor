@@ -44,6 +44,49 @@ VALIDATION_BYPASS_DOCUMENT_TYPES = frozenset(
 )
 
 
+# V1-2273: list fields whose items are stored one row per item by the projects
+# service (repeated-field.registry.ts). Each source file's list must reach the
+# projects service intact, so these fields never go through pick-one conflict
+# resolution — the projects service merges the items by anchor.
+ADDITIVE_LIST_FIELDS = frozenset(
+    {
+        "monthly_consumption",
+        "financial_ratios",
+        "annual_filings",
+        "annual_cash_flows",
+        "certificates",
+        "shareholders",
+        "electrical_test_results",
+        "performance_metrics",
+        "existing_mortgages",
+        "cable_entries",
+    }
+)
+
+# V1-2273: list fields the projects service stores as ONE value. When several
+# files of the same type are processed together, their items are combined
+# (de-duplicated) instead of one file's list being picked.
+# `services_included` is deliberately absent: each O&M contract has its own services.
+COMBINED_LIST_FIELDS = frozenset(
+    {
+        "environmental_aspects_covered",
+        "social_aspects_covered",
+        "monitoring_indicators",
+        "risks_covered",
+        "land_title_documents_listed",
+        "lease_contracts_listed",
+    }
+)
+
+
+def is_additive_list_field(field_name: str) -> bool:
+    return field_name in ADDITIVE_LIST_FIELDS
+
+
+def is_combined_list_field(field_name: str) -> bool:
+    return field_name in COMBINED_LIST_FIELDS
+
+
 def should_disable_cross_document_validation(
     document_type: DocumentType | str,
     field_names: Optional[List[str]] = None,
