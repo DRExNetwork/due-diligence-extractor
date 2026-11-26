@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import html
 import re
+from datetime import date
 from enum import Enum
 from typing import Any, Dict, List, Literal, Optional, Tuple, Type
 from urllib.parse import quote
@@ -295,7 +296,8 @@ class LegalInformation(BaseModel):
         description="Date of company incorporation (format: YYYY-MM-DD if possible)"
     )
 
-    # Computed field (will be calculated post-extraction)
+    # Computed field (V1-2448): never asked of the model — the extraction schema drops
+    # it and normalize_legal_information_extraction() fills it from incorporation_date.
     years_operating: Optional[int] = Field(
         default=None,
         description="Years operating - computed as current year minus incorporation year",
@@ -1144,6 +1146,60 @@ def _decode_html_entities(value: Any) -> Any:
     return value
 
 
+_YEAR_RE = re.compile(r"(?<!\d)(1[89]\d{2}|20\d{2})(?!\d)")
+
+
+def compute_years_operating(
+    incorporation_date: Any, today: Optional[date] = None
+) -> Optional[int]:
+    """Current year minus the incorporation year (V1-2448).
+
+    Reads the year out of any date shape the certificate gives ("2003-04-08",
+    "08/04/2003", "8 de abril de 2003", "2003"). No year, or a year after today,
+    gives None — never a guess.
+    """
+    if not isinstance(incorporation_date, str):
+        return None
+    match = _YEAR_RE.search(incorporation_date)
+    if not match:
+        return None
+    current_year = (today or date.today()).year
+    incorporation_year = int(match.group(1))
+    if incorporation_year > current_year:
+        return None
+    return current_year - incorporation_year
+
+
+def normalize_legal_information_extraction(
+    extracted: Dict[str, Any],
+    extraction_metadata: Optional[Dict[str, Any]] = None,
+    today: Optional[date] = None,
+) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    """Fill years_operating from incorporation_date instead of trusting the model.
+
+    The value is calculated, so it carries the incorporation date's metadata
+    (confidence, references): the page that proves the date proves the years.
+    A request that asked for neither field gets neither back.
+    """
+    if "incorporation_date" not in extracted and "years_operating" not in extracted:
+        return extracted, extraction_metadata
+
+    normalized = dict(extracted)
+    years = compute_years_operating(normalized.get("incorporation_date"), today)
+    normalized["years_operating"] = years
+
+    normalized_metadata = extraction_metadata
+    if isinstance(extraction_metadata, dict):
+        normalized_metadata = dict(extraction_metadata)
+        date_meta = extraction_metadata.get("incorporation_date")
+        if years is not None and isinstance(date_meta, dict):
+            normalized_metadata["years_operating"] = dict(date_meta)
+        else:
+            normalized_metadata.pop("years_operating", None)
+
+    return normalized, normalized_metadata
+
+
 def normalize_extracted_document(
     document_type: DocumentType | str,
     extracted: Dict[str, Any],
@@ -1170,6 +1226,9 @@ def normalize_extracted_document(
 
     if doc_type_value == DocumentType.CASH_FLOW_STATEMENTS.value:
         return normalize_cash_flow_statements_extraction(extracted, extraction_metadata)
+
+    if doc_type_value == DocumentType.CERTIFICATE_OF_LEGAL_EXISTENCE.value:
+        return normalize_legal_information_extraction(extracted, extraction_metadata)
 
     if doc_type_value == DocumentType.PROJECT_SIMULATION_REPORT.value:
         normalized = dict(extracted)

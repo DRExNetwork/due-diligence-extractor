@@ -4,6 +4,12 @@
 **Base URL:** `http://<host>:8000`  
 **Docs:** `/docs` (Swagger UI) · `/redoc` (ReDoc)
 
+## Revision history
+
+| Version | Date | What changed | Why |
+|---|---|---|---|
+| 2.0.1 | 2026-11-26 | Parse cache: key includes the parse model, entries never expire, how to clear a bad entry. New "Calculated fields" section: `years_operating` is calculated from `incorporation_date`. | V1-2448: a bad cached parse left the RUC certificate's incorporation date empty on dev since 2026-09-11, and `years_operating` was guessed by the model. Write-up: `docs/V1-2448-stale-parse-cache.md`. |
+
 ---
 
 ## Table of Contents
@@ -26,6 +32,7 @@
   - [Field Ownership Map](#field-ownership-map)
 - [Validation Matching Logic](#validation-matching-logic)
 - [Shared Models](#shared-models)
+- [Calculated fields](#calculated-fields)
 - [Field Grounding](#field-grounding)
 - [Error Handling](#error-handling)
 
@@ -77,9 +84,12 @@ After parsing a document via the LandingAI SDK, both the **markdown output** and
 
 | Artifact | S3 Key Pattern | Content Type |
 |----------|----------------|--------------|
-| Markdown | `{prefix}/{sha256}.md` | `text/markdown; charset=utf-8` |
-| Parse metadata | `{prefix}/{sha256}.meta.json` | `application/json; charset=utf-8` |
-| Parse response (chunks) | `{prefix}/{sha256}.parse.json` | `application/json; charset=utf-8` |
+| Markdown | `{prefix}/{parse_model}/{sha256}.md` | `text/markdown; charset=utf-8` |
+| Parse metadata | `{prefix}/{parse_model}/{sha256}.meta.json` | `application/json; charset=utf-8` |
+| Parse response (chunks) | `{prefix}/{parse_model}/{sha256}.parse.json` | `application/json; charset=utf-8` |
+
+`{parse_model}` is the parse model slug (default `dpt-2-latest`), added 2026-07-14 (T8.7). Entries
+written before that sit at `{prefix}/{sha256}.*` and are no longer read.
 
 **Cache flow:**
 
@@ -98,6 +108,22 @@ Document ──► SHA-256 hash ──► Check S3 for {hash}.md
 The parse response contains chunk-level bounding boxes (`grounding` data). By caching it alongside the markdown, **field grounding** (source locations) remains available even on cache hits, avoiding the need to re-parse.
 
 **Config:** Cache is enabled via `markdown_cache=True` parameter. Bucket from `DDX_MARKDOWN_CACHE_BUCKET` or `S3_BUCKET`. Prefix from `DDX_MARKDOWN_CACHE_PREFIX` (default: `ddx-cache/markdown`).
+
+**Entries never expire, and nothing checks a parse before saving it.** If the parser returns a bad
+result once (for example table cells as `<MISSING CELL VALUE>`), every later upload of the same
+file, in any project, reuses that bad result. The local E2E runner turns the cache off, so the
+same file looks fine locally.
+
+**Clearing a bad entry** (V1-2448):
+
+```bash
+SHA=$(shasum -a 256 file.pdf | cut -d' ' -f1)
+P=s3://drex-network/ddx-cache/markdown/dpt-2-latest/$SHA
+aws s3 cp $P.md - | grep -c "MISSING CELL VALUE"   # read first: is the text really bad?
+aws s3 rm $P.md && aws s3 rm $P.meta.json && aws s3 rm $P.parse.json
+```
+
+The next upload parses the file again and saves the new result.
 
 ---
 
@@ -969,6 +995,21 @@ Returned in the `errors` array of all extraction responses.
   "error_message": "Failed to parse document"
 }
 ```
+
+---
+
+## Calculated fields
+
+Some schema fields are never asked of the model. They are removed from the schema sent to
+LandingAI and filled after extraction in `normalize_extracted_document()` (`categories.py`).
+
+| Document type | Field | Rule | Metadata |
+|---|---|---|---|
+| Certificate of Legal Existence | `years_operating` | current year − year of `incorporation_date` (year read from `2003-04-08`, `08/04/2003`, `8 de abril de 2003`, `2003`); no year, or a future year → `null` | copy of `incorporation_date`'s (confidence, references) |
+| Project Simulation Report | `google_maps_link` | built from `geographical_coordinates` | none |
+
+On `extract-fields` / targeted requests that ask for `years_operating`, the model is asked for
+`incorporation_date` instead, and only the requested fields are returned (V1-2448).
 
 ---
 
