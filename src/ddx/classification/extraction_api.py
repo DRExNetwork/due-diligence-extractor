@@ -93,6 +93,26 @@ _EQUIPMENT_RESEARCH_ONLY_FIELDS = {
 
 _PROJECT_SIMULATION_DERIVED_FIELDS = {"google_maps_link"}
 
+# V1-2448: years_operating is calculated from incorporation_date after extraction
+# (normalize_legal_information_extraction), so the model is never asked for it.
+_LEGAL_INFORMATION_DERIVED_FIELDS = {"years_operating"}
+
+
+def _is_legal_information_document_type(document_type: str) -> bool:
+    return (
+        document_type or ""
+    ).strip().lower() == DocumentType.CERTIFICATE_OF_LEGAL_EXISTENCE.value.strip().lower()
+
+
+def _schema_fields_for_request(document_type: str, fields: List[str]) -> List[str]:
+    """Fields to ask the model for: a calculated field is swapped for its source."""
+    if not _is_legal_information_document_type(document_type):
+        return list(fields)
+    schema_fields = [f for f in fields if f not in _LEGAL_INFORMATION_DERIVED_FIELDS]
+    if len(schema_fields) != len(fields) and "incorporation_date" not in schema_fields:
+        schema_fields.append("incorporation_date")
+    return schema_fields
+
 
 def _is_equipment_sheets_document_type(document_type: str) -> bool:
     return (
@@ -1472,6 +1492,8 @@ async def _async_extract_fields(
         schema = _remove_schema_fields(schema, _EQUIPMENT_RESEARCH_ONLY_FIELDS)
     if _is_project_simulation_report_document_type(doc_type):
         schema = _remove_schema_fields(schema, _PROJECT_SIMULATION_DERIVED_FIELDS)
+    if _is_legal_information_document_type(doc_type):
+        schema = _remove_schema_fields(schema, _LEGAL_INFORMATION_DERIVED_FIELDS)
 
     raw = await _async_extract(
         client, markdown_content, schema, model=model, rate_limiter=rate_limiter
@@ -2113,7 +2135,8 @@ async def extract_specific_fields_async(
             markdown_cache_prefix,
         )
 
-        partial_schema_cls = _create_partial_schema(full_schema_cls, fields)
+        schema_fields = _schema_fields_for_request(document_type, fields)
+        partial_schema_cls = _create_partial_schema(full_schema_cls, schema_fields)
         schema = pydantic_to_json_schema(partial_schema_cls)
 
         raw = await _async_extract(
@@ -2125,6 +2148,12 @@ async def extract_specific_fields_async(
             extracted,
             raw.get("extraction_metadata"),
         )
+        # A source field asked only to calculate another one is not returned.
+        extra_fields = set(schema_fields) - set(fields)
+        if extra_fields:
+            extracted = {k: v for k, v in extracted.items() if k not in extra_fields}
+            if isinstance(ext_meta, dict):
+                ext_meta = {k: v for k, v in ext_meta.items() if k not in extra_fields}
         raw["extraction_metadata"] = ext_meta
         _print_extracted_variables(file_name, extracted)
 
